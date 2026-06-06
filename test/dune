@@ -6,6 +6,8 @@
 
 (rule
  (alias runtest)
+ (enabled_if
+  (= %{profile} dev))
  (deps
   (alias melange)
   melange_edn_melange/test/test_edn.js

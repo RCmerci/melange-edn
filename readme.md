@@ -61,4 +61,4 @@ dune runtest
 
 ## License
 
-Not specified yet.
+MIT
