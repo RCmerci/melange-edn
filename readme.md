@@ -27,19 +27,18 @@ let json_text =
   to_json_string edn
 ```
 
-Construct values directly with the typed constructors:
+Construct values with the typed creation functions:
 
 ```ocaml
 open Melange_edn
 
 let value =
-  Any
-    (Map
-       (Iarray.of_list
-          [
-            (Any (Keyword "name"), Any (String "Ada"));
-            (Any (Keyword "ok"), Any (Bool true));
-          ]))
+  any
+    (map
+       [
+         (any (keyword "name"), any (string "Ada"));
+         (any (keyword "ok"), any (bool true));
+       ])
 
 let text =
   to_edn_string value

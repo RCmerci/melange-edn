@@ -25,9 +25,40 @@ type _ t =
 
 and any = Any : _ t -> any
 
-let any value = Any value
-
 exception Parse_error of string
+
+let invalid_keyword_name value =
+  value = ""
+  || value.[0] = ':'
+  || value = "/"
+  || String.starts_with ~prefix:"/" value
+
+let invalid_symbol_name value =
+  String.length value > 0 && value.[0] = ':'
+
+let any value = Any value
+let nil = Nil
+let bool value = Bool value
+let string value = String value
+let char value = Char value
+let symbol value =
+  if invalid_symbol_name value then raise (Parse_error ("invalid symbol: " ^ value));
+  Symbol value
+
+let keyword value =
+  if invalid_keyword_name value then
+    raise (Parse_error ("invalid keyword: :" ^ value));
+  Keyword value
+
+let int value = Int value
+let bigint value = Bigint value
+let float value = Float value
+let decimal value = Decimal value
+let list values = List (Iarray.of_list values)
+let vector values = Vector (Iarray.of_list values)
+let map entries = Map (Iarray.of_list entries)
+let set values = Set (Iarray.of_list values)
+let tagged tag value = Tagged (tag, value)
 
 module Parser = struct
   type parser = { source : string; mutable pos : int; len : int }
@@ -237,11 +268,10 @@ module Parser = struct
         match parse_number token with
         | Some value -> value
         | None when String.length token > 0 && token.[0] = ':' ->
-            if
-              String.length token = 1
-              || (String.length token > 1 && token.[1] = ':')
-            then parse_error parser ("invalid keyword: " ^ token)
-            else any (Keyword (String.sub token 1 (String.length token - 1)))
+            let value = String.sub token 1 (String.length token - 1) in
+            if invalid_keyword_name value then
+              parse_error parser ("invalid keyword: " ^ token)
+            else any (Keyword value)
         | None -> any (Symbol token))
 
   let read_char parser =

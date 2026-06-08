@@ -1,59 +1,57 @@
 open Melange_edn
 
-let ia = Iarray.of_list
-let v value = Any value
-let nil = v Nil
-let bool value = v (Bool value)
-let string value = v (String value)
-let char value = v (Char value)
-let symbol value = v (Symbol value)
-let keyword value = v (Keyword value)
-let int value = v (Int value)
-let bigint value = v (Bigint value)
-let float value = v (Float value)
-let decimal value = v (Decimal value)
-let list values = v (List (ia values))
-let vector values = v (Vector (ia values))
-let map entries = v (Map (ia entries))
-let set values = v (Set (ia values))
-let tagged tag value = v (Tagged (tag, value))
+let edn value = any value
+let edn_nil = edn nil
+let edn_bool value = edn (bool value)
+let edn_string value = edn (string value)
+let edn_char value = edn (char value)
+let edn_symbol value = edn (symbol value)
+let edn_keyword value = edn (keyword value)
+let edn_int value = edn (int value)
+let edn_bigint value = edn (bigint value)
+let edn_float value = edn (float value)
+let edn_decimal value = edn (decimal value)
+let edn_list values = edn (list values)
+let edn_vector values = edn (vector values)
+let edn_map entries = edn (map entries)
+let edn_set values = edn (set values)
+let edn_tagged tag value = edn (tagged tag value)
 
 let () =
   Jest.describe "EDN reader/writer" (fun () ->
       Jest.describe "GADT constructors" (fun () ->
-          let typed_bool : bool Melange_edn.t = Bool true in
-          let typed_int : number Melange_edn.t = Int 42L in
-          let typed_bigint : number Melange_edn.t = Bigint "42" in
-          let typed_float : number Melange_edn.t = Float 42.5 in
-          let typed_decimal : number Melange_edn.t = Decimal "42.5" in
-          let typed_string : string Melange_edn.t = String "typed" in
-          let typed_symbol : symbol Melange_edn.t = Symbol "typed/symbol" in
-          let typed_keyword : keyword Melange_edn.t = Keyword "typed/keyword" in
+          let typed_bool : bool Melange_edn.t = bool true in
+          let typed_int : number Melange_edn.t = int 42L in
+          let typed_bigint : number Melange_edn.t = bigint "42" in
+          let typed_float : number Melange_edn.t = float 42.5 in
+          let typed_decimal : number Melange_edn.t = decimal "42.5" in
+          let typed_string : string Melange_edn.t = string "typed" in
+          let typed_symbol : symbol Melange_edn.t = symbol "typed/symbol" in
+          let typed_keyword : keyword Melange_edn.t = keyword "typed/keyword" in
           let typed_list : list_ Melange_edn.t =
-            List (ia [ v typed_symbol; v typed_keyword ])
+            list [ edn typed_symbol; edn typed_keyword ]
           in
           let typed_set : set Melange_edn.t =
-            Set
-              (ia
-                 [ v typed_int; v typed_bigint; v typed_float; v typed_decimal ])
+            set
+              [ edn typed_int; edn typed_bigint; edn typed_float; edn typed_decimal ]
           in
           let typed_map : map Melange_edn.t =
-            Map (ia [ (v typed_keyword, v typed_list) ])
+            map [ (edn typed_keyword, edn typed_list) ]
           in
           let typed_vector : vector Melange_edn.t =
-            Vector (ia [ v typed_bool; v typed_int; v typed_string ])
+            vector [ edn typed_bool; edn typed_int; edn typed_string ]
           in
           Jest.test "writes existential typed vectors" (fun () ->
               Jest.Expect.(
-                expect (to_edn_string (v typed_vector))
+                expect (to_edn_string (edn typed_vector))
                 |> toEqual {|[true 42 "typed"]|}));
           Jest.test "keeps typed collection constructors distinct" (fun () ->
               Jest.Expect.(
-                expect (to_edn_string (v typed_map))
+                expect (to_edn_string (edn typed_map))
                 |> toEqual {|{:typed/keyword (typed/symbol :typed/keyword)}|}));
           Jest.test "keeps typed set constructor distinct" (fun () ->
               Jest.Expect.(
-                expect (to_edn_string (v typed_set))
+                expect (to_edn_string (edn typed_set))
                 |> toEqual {|#{42 42N 42.5 42.5M}|})));
       Jest.describe "EDN parsing" (fun () ->
           Jest.test "parses nil" (fun () ->
@@ -140,26 +138,26 @@ let () =
               Jest.Expect.(
                 expect
                   (to_edn_string
-                     (list (of_edn_string_all "1 #_ignored 2 :done")))
+                     (edn_list (of_edn_string_all "1 #_ignored 2 :done")))
                 |> toEqual "(1 2 :done)"));
           Jest.describe "EDN writing" (fun () ->
               Jest.test "writes atoms" (fun () ->
                   Jest.Expect.(
                     expect
                       (to_edn_string
-                         (vector
+                         (edn_vector
                             [
-                              nil;
-                              bool true;
-                              bool false;
-                              string "a\nb";
-                              char (Uchar.of_char ' ');
-                              keyword "k";
-                              symbol "sym";
-                              int 42L;
-                              float 1.5;
-                              bigint "123";
-                              decimal "1.20";
+                              edn_nil;
+                              edn_bool true;
+                              edn_bool false;
+                              edn_string "a\nb";
+                              edn_char (Uchar.of_char ' ');
+                              edn_keyword "k";
+                              edn_symbol "sym";
+                              edn_int 42L;
+                              edn_float 1.5;
+                              edn_bigint "123";
+                              edn_decimal "1.20";
                             ]))
                     |> toEqual
                          {|[nil true false "a\nb" \space :k sym 42 1.5 123N 1.20M]|}));
@@ -167,26 +165,28 @@ let () =
                   Jest.Expect.(
                     expect
                       (to_edn_string
-                         (map
+                         (edn_map
                             [
-                              (keyword "a", int 1L);
-                              (string "b", vector [ bool true; nil ]);
-                              (keyword "s", set [ symbol "x"; symbol "y" ]);
-                              ( keyword "tag",
-                                tagged "my/app"
-                                  (map [ (keyword "ok", bool true) ]) );
+                              (edn_keyword "a", edn_int 1L);
+                              (edn_string "b", edn_vector [ edn_bool true; edn_nil ]);
+                              ( edn_keyword "s",
+                                edn_set [ edn_symbol "x"; edn_symbol "y" ] );
+                              ( edn_keyword "tag",
+                                edn_tagged "my/app"
+                                  (edn_map [ (edn_keyword "ok", edn_bool true) ])
+                              );
                             ]))
                     |> toEqual
                          {|{:a 1 "b" [true nil] :s #{x y} :tag #my/app {:ok true}}|})));
           Jest.describe "JSON conversion" (fun () ->
               let edn =
-                map
+                edn_map
                   [
-                    (string "name", string "Ada");
-                    (string "age", int 37L);
-                    (string "large", int 3000000000L);
-                    (string "admin", bool false);
-                    (string "tags", vector [ string "ocaml"; nil ]);
+                    (edn_string "name", edn_string "Ada");
+                    (edn_string "age", edn_int 37L);
+                    (edn_string "large", edn_int 3000000000L);
+                    (edn_string "admin", edn_bool false);
+                    (edn_string "tags", edn_vector [ edn_string "ocaml"; edn_nil ]);
                   ]
               in
               Jest.test "reads JSON strings" (fun () ->
@@ -204,7 +204,9 @@ let () =
               Jest.test "writes keyword map keys as JSON object names"
                 (fun () ->
                   Jest.Expect.(
-                    expect (to_json_string (map [ (keyword "ok", bool true) ]))
+                    expect
+                      (to_json_string
+                         (edn_map [ (edn_keyword "ok", edn_bool true) ]))
                     |> toEqual {|{"ok":true}|})));
           Jest.describe "errors" (fun () ->
               Jest.test "rejects trailing forms" (fun () ->
@@ -225,6 +227,37 @@ let () =
                   Jest.Expect.(
                     expectFn (fun () -> ignore (of_edn_string "::bad")) ()
                     |> toThrow));
+              Jest.test "rejects slash-only keyword namespace forms" (fun () ->
+                  let results =
+                    Array.map
+                      (fun source ->
+                        try
+                          ignore (of_edn_string source);
+                          "accepted"
+                        with Parse_error _ -> "rejected")
+                      [| ":/"; ":/anything" |]
+                  in
+                  Jest.Expect.(
+                    expect results |> toEqual [| "rejected"; "rejected" |]));
+              Jest.test "rejects invalid keyword creation inputs" (fun () ->
+                  let results =
+                    Array.map
+                      (fun value ->
+                        try
+                          ignore (keyword value);
+                          "accepted"
+                        with Parse_error _ -> "rejected")
+                      [| ""; ":bad"; "/"; "/anything" |]
+                  in
+                  Jest.Expect.(
+                    expect results
+                    |> toEqual
+                         [| "rejected"; "rejected"; "rejected"; "rejected" |]));
+              Jest.test "rejects symbol creation inputs that look like keywords"
+                (fun () ->
+                  Jest.Expect.(
+                    expectFn (fun () -> ignore (symbol ":looks-like-keyword")) ()
+                    |> toThrow));
               Jest.test "rejects discard without value" (fun () ->
                   Jest.Expect.(
                     expectFn (fun () -> ignore (of_edn_string "[1 #_]")) ()
@@ -235,11 +268,15 @@ let () =
                       (fun () ->
                         ignore
                           (to_json_string
-                             (map
+                             (edn_map
                                 [
-                                  ( vector
-                                      [ string "not"; string "a"; string "key" ],
-                                    int 1L );
+                                  ( edn_vector
+                                      [
+                                        edn_string "not";
+                                        edn_string "a";
+                                        edn_string "key";
+                                      ],
+                                    edn_int 1L );
                                 ])))
                       ()
                     |> toThrow)))))

@@ -3,6 +3,7 @@
 (using melange 0.1)
 
 (name melange-edn)
+(version 0.2.0)
 
 (generate_opam_files true)
 
