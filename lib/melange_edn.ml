@@ -1,4 +1,4 @@
-type keyword
+type keyword = string
 type symbol
 type map
 type set
@@ -12,7 +12,7 @@ type _ t =
   | String : string -> string t
   | Char : Uchar.t -> Uchar.t t
   | Symbol : string -> symbol t
-  | Keyword : string -> keyword t
+  | Keyword : keyword -> keyword t
   | Int : int64 -> number t
   | Bigint : string -> number t
   | Float : float -> number t
@@ -49,6 +49,8 @@ let keyword value =
   if invalid_keyword_name value then
     raise (Parse_error ("invalid keyword: :" ^ value));
   Keyword value
+
+let keyword_to_string value = value
 
 let int value = Int value
 let bigint value = Bigint value
@@ -425,7 +427,7 @@ let rec to_edn_string (Any value) =
   | String value -> "\"" ^ escape_string value ^ "\""
   | Char value -> string_of_char_literal value
   | Symbol value -> value
-  | Keyword value -> ":" ^ value
+  | Keyword value -> ":" ^ keyword_to_string value
   | Int value -> Int64.to_string value
   | Bigint value -> normalize_number value ^ "N"
   | Float value -> string_of_float value
@@ -485,7 +487,7 @@ let of_json_string source = Js.Json.parseExn source |> of_json
 let json_key_of_value (Any value) =
   match value with
   | String value -> value
-  | Keyword value -> value
+  | Keyword value -> keyword_to_string value
   | Symbol value -> value
   | _ ->
       invalid_arg
@@ -512,7 +514,7 @@ and to_json (Any value) =
   | String value -> Js.Json.string value
   | Char value -> Js.Json.string (string_of_char_literal value)
   | Symbol value -> Js.Json.string value
-  | Keyword value -> Js.Json.string (":" ^ value)
+  | Keyword value -> Js.Json.string (":" ^ keyword_to_string value)
   | Int value -> json_number_of_int64 value
   | Bigint value -> Js.Json.string value
   | Float value -> Js.Json.number value

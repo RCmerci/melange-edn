@@ -12,7 +12,7 @@ type _ t = private
   | String : string -> string t
   | Char : Uchar.t -> Uchar.t t
   | Symbol : string -> symbol t
-  | Keyword : string -> keyword t
+  | Keyword : keyword -> keyword t
   | Int : int64 -> number t
   | Bigint : string -> number t
   | Float : float -> number t
@@ -43,6 +43,8 @@ val vector : any list -> vector t
 val map : (any * any) list -> map t
 val set : any list -> set t
 val tagged : string -> any -> (string * any) t
+
+val keyword_to_string : keyword -> string
 
 val of_edn_string : string -> any
 val of_edn_string_all : string -> any list

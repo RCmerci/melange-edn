@@ -52,7 +52,15 @@ let () =
           Jest.test "keeps typed set constructor distinct" (fun () ->
               Jest.Expect.(
                 expect (to_edn_string (edn typed_set))
-                |> toEqual {|#{42 42N 42.5 42.5M}|})));
+                |> toEqual {|#{42 42N 42.5 42.5M}|}));
+          Jest.test "exposes keyword names through an accessor" (fun () ->
+              let constructed =
+                match keyword "typed/keyword" with
+                | Keyword value -> value
+                | _ -> failwith "expected keyword"
+              in
+              Jest.Expect.(
+                expect (keyword_to_string constructed) |> toEqual "typed/keyword")));
       Jest.describe "EDN parsing" (fun () ->
           Jest.test "parses nil" (fun () ->
               Jest.Expect.(
@@ -90,6 +98,13 @@ let () =
                     to_edn_string (of_edn_string ":my.ns/name");
                   |]
                 |> toEqual [| "my.ns/name"; ":my.ns/name" |]));
+          Jest.test "parses abstract keyword values" (fun () ->
+              let parsed_name =
+                match of_edn_string ":my.ns/name" with
+                | Any (Keyword value) -> keyword_to_string value
+                | _ -> "not a keyword"
+              in
+              Jest.Expect.(expect parsed_name |> toEqual "my.ns/name"));
           Jest.test "parses numeric literals" (fun () ->
               Jest.Expect.(
                 expect
