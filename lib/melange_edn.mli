@@ -1,10 +1,12 @@
-type keyword
-type symbol
-type map
-type set
-type vector
-type list_
-type number
+type keyword = Keyword_tag
+type symbol = Symbol_tag
+type map = Map_tag
+type set = Set_tag
+type vector = Vector_tag
+type list_ = List_tag
+type number = Number_tag
+
+type keyword_value
 
 type _ t = private
   | Nil : unit t
@@ -12,7 +14,7 @@ type _ t = private
   | String : string -> string t
   | Char : Uchar.t -> Uchar.t t
   | Symbol : string -> symbol t
-  | Keyword : keyword -> keyword t
+  | Keyword : keyword_value -> keyword t
   | Int : int64 -> number t
   | Bigint : string -> number t
   | Float : float -> number t
@@ -44,7 +46,7 @@ val map : (any * any) list -> map t
 val set : any list -> set t
 val tagged : string -> any -> (string * any) t
 
-val keyword_to_string : keyword -> string
+val keyword_to_string : keyword_value -> string
 
 val of_edn_string : string -> any
 val of_edn_string_all : string -> any list
