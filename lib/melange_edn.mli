@@ -1,3 +1,4 @@
+type char_ = Char_tag
 type keyword = Keyword_tag
 type symbol = Symbol_tag
 type map = Map_tag
@@ -12,7 +13,7 @@ type _ t = private
   | Nil : unit t
   | Bool : bool -> bool t
   | String : string -> string t
-  | Char : Uchar.t -> Uchar.t t
+  | Char : Uchar.t -> char_ t
   | Symbol : string -> symbol t
   | Keyword : keyword_value -> keyword t
   | Int : int64 -> number t
@@ -33,7 +34,7 @@ val any : _ t -> any
 val nil : unit t
 val bool : bool -> bool t
 val string : string -> string t
-val char : Uchar.t -> Uchar.t t
+val char : Uchar.t -> char_ t
 val symbol : string -> symbol t
 val keyword : string -> keyword t
 val int : int64 -> number t

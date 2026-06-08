@@ -26,6 +26,7 @@ let () =
           let typed_float : number Melange_edn.t = float 42.5 in
           let typed_decimal : number Melange_edn.t = decimal "42.5" in
           let typed_string : string Melange_edn.t = string "typed" in
+          let typed_char : char_ Melange_edn.t = char (Uchar.of_char 'x') in
           let typed_symbol : symbol Melange_edn.t = symbol "typed/symbol" in
           let typed_keyword : keyword Melange_edn.t = keyword "typed/keyword" in
           let typed_list : list_ Melange_edn.t =
@@ -45,6 +46,9 @@ let () =
               Jest.Expect.(
                 expect (to_edn_string (edn typed_vector))
                 |> toEqual {|[true 42 "typed"]|}));
+          Jest.test "writes existential typed chars" (fun () ->
+              Jest.Expect.(
+                expect (to_edn_string (edn typed_char)) |> toEqual {|\x|}));
           Jest.test "keeps typed collection constructors distinct" (fun () ->
               Jest.Expect.(
                 expect (to_edn_string (edn typed_map))
@@ -57,7 +61,7 @@ let () =
               let constructed =
                 match keyword "typed/keyword" with
                 | Keyword value -> value
-                | _ -> failwith "expected keyword"
+                | _ -> .
               in
               Jest.Expect.(
                 expect (keyword_to_string constructed) |> toEqual "typed/keyword")));
