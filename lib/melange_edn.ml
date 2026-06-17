@@ -111,6 +111,9 @@ module Parser = struct
     | ch when is_whitespace ch -> true
     | _ -> false
 
+  let is_octal_digit = function '0' .. '7' -> true | _ -> false
+  let octal_digit_value ch = Char.code ch - Char.code '0'
+
   let read_hex4 parser =
     if parser.pos + 4 > parser.len then
       parse_error parser "incomplete unicode escape";
@@ -130,6 +133,34 @@ module Parser = struct
     | uchar -> uchar
     | exception Invalid_argument _ ->
         parse_error parser "invalid unicode scalar"
+
+  let read_octal_escape parser first_digit =
+    let rec loop remaining value =
+      if remaining = 0 then value
+      else
+        match peek parser with
+        | Some ch when is_octal_digit ch ->
+            parser.pos <- parser.pos + 1;
+            loop (remaining - 1) ((value * 8) + octal_digit_value ch)
+        | _ -> value
+    in
+    let value = loop 2 first_digit in
+    if value > 255 then parse_error parser "octal escape is out of range";
+    Uchar.of_int value
+
+  let octal_char_of_token token =
+    let len = String.length token in
+    if len < 2 || len > 4 || token.[0] <> 'o' then None
+    else
+      let rec loop pos value =
+        if pos = len then Some value
+        else if is_octal_digit token.[pos] then
+          loop (pos + 1) ((value * 8) + octal_digit_value token.[pos])
+        else None
+      in
+      match loop 1 0 with
+      | Some value when value <= 255 -> Some (Uchar.of_int value)
+      | _ -> None
 
   let read_string parser =
     let buffer = Buffer.create 32 in
@@ -162,6 +193,10 @@ module Parser = struct
           | 'u' ->
               Buffer.add_utf_8_uchar buffer (read_hex4 parser);
               loop ()
+          | '0' .. '7' as ch ->
+              Buffer.add_utf_8_uchar buffer
+                (read_octal_escape parser (octal_digit_value ch));
+              loop ()
           | ch ->
               parse_error parser
                 (Printf.sprintf "unsupported string escape: \\%c" ch))
@@ -184,7 +219,6 @@ module Parser = struct
 
   let is_digit = function '0' .. '9' -> true | _ -> false
   let is_nonzero_digit = function '1' .. '9' -> true | _ -> false
-  let is_octal_digit = function '0' .. '7' -> true | _ -> false
 
   let skip_sign token =
     if String.length token > 0 && (token.[0] = '+' || token.[0] = '-') then 1
@@ -326,6 +360,28 @@ module Parser = struct
   let normalize_numeric_literal value =
     match strip_leading_plus value with "-0" -> "0" | value -> value
 
+  let invalid_based_integer_literal token =
+    let len = String.length token in
+    let start = skip_sign token in
+    if start >= len || not (is_digit token.[start]) then false
+    else if start + 1 < len && token.[start] = '0' && is_digit token.[start + 1]
+            && not
+                 (String.for_all is_octal_digit
+                    (String.sub token start (len - start)))
+    then true
+    else if start + 1 < len && token.[start] = '0'
+            && (token.[start + 1] = 'x' || token.[start + 1] = 'X')
+    then Option.is_none (parse_unsigned_based_integer 16 token (start + 2))
+    else
+      match find_radix_marker token start with
+      | None -> false
+      | Some marker_pos -> (
+          match parse_decimal_base token start marker_pos with
+          | Some base when base >= 2 && base <= 36 ->
+              Option.is_none
+                (parse_unsigned_based_integer base token (marker_pos + 1))
+          | _ -> true)
+
   let parse_number token =
     let len = String.length token in
     if len > 1 && token.[len - 1] = 'N' then
@@ -365,6 +421,8 @@ module Parser = struct
             if invalid_keyword_name value then
               parse_error parser ("invalid keyword: " ^ token)
             else any (Keyword value)
+        | None when invalid_based_integer_literal token ->
+            parse_error parser ("Invalid number: " ^ token)
         | None -> any (Symbol token))
 
   let read_char parser =
@@ -377,6 +435,10 @@ module Parser = struct
     | "tab" -> any (Char (Uchar.of_char '\t'))
     | "backspace" -> any (Char (Uchar.of_char '\b'))
     | "formfeed" -> any (Char (Uchar.of_char '\012'))
+    | _ when String.length token > 0 && token.[0] = 'o' -> (
+        match octal_char_of_token token with
+        | Some uchar -> any (Char uchar)
+        | None -> parse_error parser ("invalid character literal: \\" ^ token))
     | _ when String.length token = 5 && token.[0] = 'u' ->
         let char_parser = create (String.sub token 1 4) in
         any (Char (read_hex4 char_parser))
@@ -431,17 +493,53 @@ module Parser = struct
     in
     loop []
 
-  and read_map parser =
+  and read_map_with_key_transform parser transform_key =
     let values = read_sequence parser '}' in
     let rec pairs keys acc = function
       | [] -> any (Map (Iarray.of_list (List.rev acc)))
       | [ _ ] -> parse_error parser "map requires an even number of forms"
       | key :: value :: rest ->
+          let key = transform_key key in
           if List.exists (fun existing -> existing = key) keys then
             parse_error parser "Map literal contains duplicate key"
           else pairs (key :: keys) ((key, value) :: acc) rest
     in
     pairs [] [] values
+
+  and read_map parser = read_map_with_key_transform parser (fun key -> key)
+
+  and expand_namespaced_key namespace (Any value as key) =
+    let expand_name name =
+      if String.starts_with ~prefix:"_/" name then
+        String.sub name 2 (String.length name - 2)
+      else if String.contains name '/' then name
+      else namespace ^ "/" ^ name
+    in
+    match value with
+    | Keyword name -> any (Keyword (expand_name name))
+    | Symbol name -> any (Symbol (expand_name name))
+    | _ -> key
+
+  and read_namespaced_map parser =
+    let namespace = read_token parser in
+    if namespace = "" then parse_error parser "missing namespaced map namespace";
+    skip_ws parser;
+    match peek parser with
+    | Some '{' ->
+        ignore (next parser);
+        read_map_with_key_transform parser (expand_namespaced_key namespace)
+    | Some ch ->
+        parse_error parser
+          (Printf.sprintf "expected namespaced map body, got %c" ch)
+    | None -> parse_error parser "missing namespaced map body"
+
+  and read_symbolic_value parser =
+    let token = read_token parser in
+    match token with
+    | "NaN" -> Some (any (Float Float.nan))
+    | "Inf" -> Some (any (Float Float.infinity))
+    | "-Inf" -> Some (any (Float Float.neg_infinity))
+    | _ -> parse_error parser ("unsupported symbolic value: ##" ^ token)
 
   and read_dispatch parser =
     match peek parser with
@@ -461,6 +559,12 @@ module Parser = struct
         ignore (next parser);
         ignore (read_required parser);
         read_value parser
+    | Some ':' ->
+        ignore (next parser);
+        Some (read_namespaced_map parser)
+    | Some '#' ->
+        ignore (next parser);
+        read_symbolic_value parser
     | Some ch when ('A' <= ch && ch <= 'Z') || ('a' <= ch && ch <= 'z') ->
         let tag = read_token parser in
         let value = read_required parser in
@@ -504,6 +608,8 @@ let escape_string value =
     | '\012' -> Buffer.add_string buffer "\\f"
     | '\\' -> Buffer.add_string buffer "\\\\"
     | '"' -> Buffer.add_string buffer "\\\""
+    | ch when Char.code ch < 0x20 ->
+        Buffer.add_string buffer (Printf.sprintf "\\u%04X" (Char.code ch))
     | ch -> Buffer.add_char buffer ch
   in
   String.iter add_escape value;
@@ -516,6 +622,8 @@ let string_of_char_literal uchar =
   else if Uchar.equal uchar (Uchar.of_char '\t') then "\\tab"
   else if Uchar.equal uchar (Uchar.of_char '\b') then "\\backspace"
   else if Uchar.equal uchar (Uchar.of_char '\012') then "\\formfeed"
+  else if Uchar.to_int uchar < 0x20 then
+    Printf.sprintf "\\u%04X" (Uchar.to_int uchar)
   else
     match Uchar.to_char uchar with
     | ch -> Printf.sprintf "\\%c" ch
@@ -542,6 +650,9 @@ let rec to_edn_string (Any value) =
   | Keyword value -> ":" ^ keyword_to_string value
   | Int value -> Int64.to_string value
   | Bigint value -> normalize_number value ^ "N"
+  | Float value when classify_float value = FP_nan -> "##NaN"
+  | Float value when classify_float value = FP_infinite && value > 0. -> "##Inf"
+  | Float value when classify_float value = FP_infinite -> "##-Inf"
   | Float value -> string_of_float value
   | Decimal value -> normalize_number value ^ "M"
   | List values -> "(" ^ join_iarray " " to_edn_string values ^ ")"

@@ -259,6 +259,71 @@ let () =
                       (fun () -> ignore (of_edn_string "#{:a :b :c :a}"))
                       ()
                     |> toThrow)));
+          Jest.describe "additional cljs.reader compatibility cases" (fun () ->
+              Jest.test "parses explicit namespaced keyword maps" (fun () ->
+                  Jest.Expect.(
+                    expect
+                      (to_edn_string
+                         (of_edn_string {|#:person{:name "Ada" :age 42}|}))
+                    |> toEqual {|{:person/name "Ada" :person/age 42}|}));
+              Jest.test "parses explicit namespaced symbol maps" (fun () ->
+                  Jest.Expect.(
+                    expect
+                      (to_edn_string
+                         (of_edn_string {|#:person{name "Ada" age 42}|}))
+                    |> toEqual {|{person/name "Ada" person/age 42}|}));
+              Jest.test "leaves namespace-qualified keys in namespaced maps"
+                (fun () ->
+                  Jest.Expect.(
+                    expect
+                      (to_edn_string
+                         (of_edn_string {|#:person{:name "Ada" :org/id 7}|}))
+                    |> toEqual {|{:person/name "Ada" :org/id 7}|}));
+              Jest.test "uses underscore namespace escape in namespaced maps"
+                (fun () ->
+                  Jest.Expect.(
+                    expect
+                      (to_edn_string
+                         (of_edn_string {|#:person{:name "Ada" :_/id 7}|}))
+                    |> toEqual {|{:person/name "Ada" :id 7}|}));
+              Jest.test "parses empty namespaced maps" (fun () ->
+                  Jest.Expect.(
+                    expect (to_edn_string (of_edn_string {|#:person{}|}))
+                    |> toEqual "{}"));
+              Jest.test "parses symbolic NaN" (fun () ->
+                  Jest.Expect.(
+                    expect (to_edn_string (of_edn_string "##NaN"))
+                    |> toEqual "##NaN"));
+              Jest.test "parses symbolic infinities" (fun () ->
+                  Jest.Expect.(
+                    expect
+                      [|
+                        to_edn_string (of_edn_string "##Inf");
+                        to_edn_string (of_edn_string "##-Inf");
+                      |]
+                    |> toEqual [| "##Inf"; "##-Inf" |]));
+              Jest.test "parses octal character literals" (fun () ->
+                  Jest.Expect.(
+                    expect (to_edn_string (of_edn_string {|[\o101 \o123]|}))
+                    |> toEqual {|[\A \S]|}));
+              Jest.test "parses octal string escapes" (fun () ->
+                  Jest.Expect.(
+                    expect (to_edn_string (of_edn_string {|"octal \060\101"|}))
+                    |> toEqual {|"octal 0A"|}));
+              Jest.test "rejects malformed based integer literals" (fun () ->
+                  let results =
+                    Array.map
+                      (fun source ->
+                        try
+                          ignore (of_edn_string source);
+                          "accepted"
+                        with Parse_error _ -> "rejected")
+                      [| "09"; "0x"; "2r102"; "37r10" |]
+                  in
+                  Jest.Expect.(
+                    expect results
+                    |> toEqual
+                         [| "rejected"; "rejected"; "rejected"; "rejected" |])));
           Jest.describe "EDN writing" (fun () ->
               Jest.test "writes atoms" (fun () ->
                   Jest.Expect.(
