@@ -147,6 +147,12 @@ module Parser = struct
           | 'n' ->
               Buffer.add_char buffer '\n';
               loop ()
+          | 'b' ->
+              Buffer.add_char buffer '\b';
+              loop ()
+          | 'f' ->
+              Buffer.add_char buffer '\012';
+              loop ()
           | '\\' ->
               Buffer.add_char buffer '\\';
               loop ()
@@ -178,6 +184,7 @@ module Parser = struct
 
   let is_digit = function '0' .. '9' -> true | _ -> false
   let is_nonzero_digit = function '1' .. '9' -> true | _ -> false
+  let is_octal_digit = function '0' .. '7' -> true | _ -> false
 
   let skip_sign token =
     if String.length token > 0 && (token.[0] = '+' || token.[0] = '-') then 1
@@ -237,6 +244,80 @@ module Parser = struct
   let has_float_marker token =
     String.exists (function '.' | 'e' | 'E' -> true | _ -> false) token
 
+  let digit_value = function
+    | '0' .. '9' as ch -> Some (Char.code ch - Char.code '0')
+    | 'a' .. 'z' as ch -> Some (10 + Char.code ch - Char.code 'a')
+    | 'A' .. 'Z' as ch -> Some (10 + Char.code ch - Char.code 'A')
+    | _ -> None
+
+  let decimal_digit_value ch = Char.code ch - Char.code '0'
+
+  let parse_unsigned_based_integer base token start =
+    let len = String.length token in
+    if start >= len then None
+    else
+      let rec loop pos acc =
+        if pos = len then Some acc
+        else
+          match digit_value token.[pos] with
+          | Some digit when digit < base ->
+              loop (pos + 1)
+                Int64.(add (mul acc (of_int base)) (of_int digit))
+          | _ -> None
+      in
+      loop start 0L
+
+  let parse_decimal_base token start marker_pos =
+    if start = marker_pos then None
+    else
+      let rec loop pos acc =
+        if pos = marker_pos then Some acc
+        else
+          match token.[pos] with
+          | ch when is_digit ch ->
+              loop (pos + 1) ((acc * 10) + decimal_digit_value ch)
+          | _ -> None
+      in
+      loop start 0
+
+  let find_radix_marker token start =
+    let len = String.length token in
+    let rec loop pos =
+      if pos >= len then None
+      else
+        match token.[pos] with
+        | 'r' | 'R' -> Some pos
+        | _ -> loop (pos + 1)
+    in
+    loop start
+
+  let parse_based_integer token =
+    let len = String.length token in
+    let sign_start = skip_sign token in
+    let sign = if sign_start = 1 && token.[0] = '-' then -1L else 1L in
+    let apply_sign value = Int64.mul sign value in
+    if sign_start + 2 < len && token.[sign_start] = '0'
+       && (token.[sign_start + 1] = 'x' || token.[sign_start + 1] = 'X')
+    then
+      Option.map apply_sign
+        (parse_unsigned_based_integer 16 token (sign_start + 2))
+    else
+      match find_radix_marker token sign_start with
+      | Some marker_pos -> (
+          match parse_decimal_base token sign_start marker_pos with
+          | Some base when base >= 2 && base <= 36 ->
+              Option.map apply_sign
+                (parse_unsigned_based_integer base token (marker_pos + 1))
+          | _ -> None)
+      | None ->
+          if sign_start + 1 < len && token.[sign_start] = '0'
+             && String.for_all is_octal_digit
+                  (String.sub token sign_start (len - sign_start))
+          then
+            Option.map apply_sign
+              (parse_unsigned_based_integer 8 token sign_start)
+          else None
+
   let strip_leading_plus value =
     if String.length value > 0 && value.[0] = '+' then
       String.sub value 1 (String.length value - 1)
@@ -249,19 +330,26 @@ module Parser = struct
     let len = String.length token in
     if len > 1 && token.[len - 1] = 'N' then
       let body = String.sub token 0 (len - 1) in
-      if full_integer_literal body then
-        Some (any (Bigint (normalize_numeric_literal body)))
-      else None
+      (match parse_based_integer body with
+      | Some value -> Some (any (Bigint (Int64.to_string value)))
+      | None ->
+          if full_integer_literal body then
+            Some (any (Bigint (normalize_numeric_literal body)))
+          else None)
     else if len > 1 && token.[len - 1] = 'M' then
       let body = String.sub token 0 (len - 1) in
       if full_float_literal body then
         Some (any (Decimal (normalize_numeric_literal body)))
       else None
-    else if has_float_marker token && full_float_literal token then
-      Some (any (Float (float_of_string token)))
-    else if full_integer_literal token then
-      Some (any (Int (Int64.of_string token)))
-    else None
+    else
+      (match parse_based_integer token with
+      | Some value -> Some (any (Int value))
+      | None ->
+          if has_float_marker token && full_float_literal token then
+            Some (any (Float (float_of_string token)))
+          else if full_integer_literal token then
+            Some (any (Int (Int64.of_string token)))
+          else None)
 
   let parse_token parser token =
     match token with
@@ -287,6 +375,8 @@ module Parser = struct
     | "return" -> any (Char (Uchar.of_char '\r'))
     | "space" -> any (Char (Uchar.of_char ' '))
     | "tab" -> any (Char (Uchar.of_char '\t'))
+    | "backspace" -> any (Char (Uchar.of_char '\b'))
+    | "formfeed" -> any (Char (Uchar.of_char '\012'))
     | _ when String.length token = 5 && token.[0] = 'u' ->
         let char_parser = create (String.sub token 1 4) in
         any (Char (read_hex4 char_parser))
@@ -343,18 +433,30 @@ module Parser = struct
 
   and read_map parser =
     let values = read_sequence parser '}' in
-    let rec pairs acc = function
+    let rec pairs keys acc = function
       | [] -> any (Map (Iarray.of_list (List.rev acc)))
       | [ _ ] -> parse_error parser "map requires an even number of forms"
-      | key :: value :: rest -> pairs ((key, value) :: acc) rest
+      | key :: value :: rest ->
+          if List.exists (fun existing -> existing = key) keys then
+            parse_error parser "Map literal contains duplicate key"
+          else pairs (key :: keys) ((key, value) :: acc) rest
     in
-    pairs [] values
+    pairs [] [] values
 
   and read_dispatch parser =
     match peek parser with
     | Some '{' ->
         ignore (next parser);
-        Some (any (Set (Iarray.of_list (read_sequence parser '}'))))
+        let values = read_sequence parser '}' in
+        let rec ensure_unique seen = function
+          | [] -> ()
+          | value :: rest ->
+              if List.exists (fun existing -> existing = value) seen then
+                parse_error parser "Set literal contains duplicate key"
+              else ensure_unique (value :: seen) rest
+        in
+        ensure_unique [] values;
+        Some (any (Set (Iarray.of_list values)))
     | Some '_' ->
         ignore (next parser);
         ignore (read_required parser);
@@ -383,7 +485,10 @@ let of_edn_string_all source =
 let of_edn_string source =
   let parser = Parser.create source in
   match Parser.read_value parser with
-  | None -> Parser.parse_error parser "expected EDN value"
+  | None ->
+      Parser.skip_ws parser;
+      if Parser.is_eof parser then any Nil
+      else Parser.parse_error parser "unexpected closing delimiter"
   | Some value ->
       Parser.skip_ws parser;
       if Parser.is_eof parser then value
@@ -395,6 +500,8 @@ let escape_string value =
     | '\t' -> Buffer.add_string buffer "\\t"
     | '\r' -> Buffer.add_string buffer "\\r"
     | '\n' -> Buffer.add_string buffer "\\n"
+    | '\b' -> Buffer.add_string buffer "\\b"
+    | '\012' -> Buffer.add_string buffer "\\f"
     | '\\' -> Buffer.add_string buffer "\\\\"
     | '"' -> Buffer.add_string buffer "\\\""
     | ch -> Buffer.add_char buffer ch
@@ -407,6 +514,8 @@ let string_of_char_literal uchar =
   else if Uchar.equal uchar (Uchar.of_char '\r') then "\\return"
   else if Uchar.equal uchar (Uchar.of_char ' ') then "\\space"
   else if Uchar.equal uchar (Uchar.of_char '\t') then "\\tab"
+  else if Uchar.equal uchar (Uchar.of_char '\b') then "\\backspace"
+  else if Uchar.equal uchar (Uchar.of_char '\012') then "\\formfeed"
   else
     match Uchar.to_char uchar with
     | ch -> Printf.sprintf "\\%c" ch

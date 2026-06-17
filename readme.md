@@ -11,6 +11,7 @@ EDN reader and writer for Melange.
 - Write EDN with `to_edn_string`
 - Convert JSON with `of_json`, `of_json_string`, `to_json`, and `to_json_string`
 - Supports EDN atoms, collections, comments, discard forms, and tagged values
+- Follows `cljs.reader/read-string` by reading empty or comment-only input as `nil`
 
 ## Usage
 

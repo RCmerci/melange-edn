@@ -159,6 +159,106 @@ let () =
                   (to_edn_string
                      (edn_list (of_edn_string_all "1 #_ignored 2 :done")))
                 |> toEqual "(1 2 :done)"));
+          Jest.describe "cljs.reader compatibility cases" (fun () ->
+              Jest.test "parses octal, hex, and radix integer literals"
+                (fun () ->
+                  Jest.Expect.(
+                    expect
+                      (Array.map
+                         (fun source -> to_edn_string (of_edn_string source))
+                         [|
+                           "052";
+                           "0x2a";
+                           "2r101010";
+                           "8R52";
+                           "16r2a";
+                           "36r16";
+                         |])
+                    |> toEqual
+                         [| "42"; "42"; "42"; "42"; "42"; "42" |]));
+              Jest.test "parses signed octal, hex, and radix integer literals"
+                (fun () ->
+                  Jest.Expect.(
+                    expect
+                      (Array.map
+                         (fun source -> to_edn_string (of_edn_string source))
+                         [|
+                           "+052";
+                           "+0x2a";
+                           "+2r101010";
+                           "+8r52";
+                           "+16R2a";
+                           "+36r16";
+                           "-052";
+                           "-0X2a";
+                           "-2r101010";
+                           "-8r52";
+                           "-16r2a";
+                           "-36R16";
+                         |])
+                    |> toEqual
+                         [|
+                           "42";
+                           "42";
+                           "42";
+                           "42";
+                           "42";
+                           "42";
+                           "-42";
+                           "-42";
+                           "-42";
+                           "-42";
+                           "-42";
+                           "-42";
+                         |]));
+              Jest.test "parses backspace and formfeed string escapes"
+                (fun () ->
+                  Jest.Expect.(
+                    expect
+                      (to_edn_string (of_edn_string {|"escape \b and \f"|}))
+                    |> toEqual {|"escape \b and \f"|}));
+              Jest.test "parses named backspace and formfeed character literals"
+                (fun () ->
+                  Jest.Expect.(
+                    expect
+                      (to_edn_string
+                         (of_edn_string {|[\backspace \formfeed]|}))
+                    |> toEqual {|[\backspace \formfeed]|}));
+              Jest.test "reads empty input as nil" (fun () ->
+                  Jest.Expect.(
+                    expect (to_edn_string (of_edn_string "")) |> toEqual "nil"));
+              Jest.test "reads comment-only input as nil" (fun () ->
+                  Jest.Expect.(
+                    expect (to_edn_string (of_edn_string "; ignored"))
+                    |> toEqual "nil"));
+              Jest.test "rejects duplicate map keys after numeric normalization"
+                (fun () ->
+                  Jest.Expect.(
+                    expectFn
+                      (fun () -> ignore (of_edn_string "{052 :octal 42 :decimal}"))
+                      ()
+                    |> toThrow));
+              Jest.test "rejects duplicate small map keys" (fun () ->
+                  Jest.Expect.(
+                    expectFn
+                      (fun () -> ignore (of_edn_string "{:a 1 :b 2 :a 3}"))
+                      ()
+                    |> toThrow));
+              Jest.test "rejects duplicate large map keys" (fun () ->
+                  Jest.Expect.(
+                    expectFn
+                      (fun () ->
+                        ignore
+                          (of_edn_string
+                             "{:a 1 :b 2 :c 3 :d 4 :e 5 :f 6 :g 7 :h 8 :i 9 :a 10}"))
+                      ()
+                    |> toThrow));
+              Jest.test "rejects duplicate set values" (fun () ->
+                  Jest.Expect.(
+                    expectFn
+                      (fun () -> ignore (of_edn_string "#{:a :b :c :a}"))
+                      ()
+                    |> toThrow)));
           Jest.describe "EDN writing" (fun () ->
               Jest.test "writes atoms" (fun () ->
                   Jest.Expect.(
