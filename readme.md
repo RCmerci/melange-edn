@@ -13,6 +13,8 @@ EDN reader and writer for Melange.
 - Supports EDN atoms, collections, comments, discard forms, and tagged values
 - Follows `cljs.reader/read-string` by reading empty or comment-only input as `nil`
 - Supports namespaced maps, symbolic floating-point values, and octal escapes
+- Reads the first form from a string, and supports ratios, regex literals, and common reader macros
+- Validates `#uuid` and `#inst` default tags
 
 ## Usage
 

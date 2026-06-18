@@ -153,6 +153,65 @@ let () =
                   (to_edn_string
                      (of_edn_string {|#inst "1985-04-12T23:20:50.52Z"|}))
                 |> toEqual {|#inst "1985-04-12T23:20:50.52Z"|}));
+          Jest.describe "cljs.reader default date and UUID tags" (fun () ->
+              Jest.test "parses UUID literals and writes canonical lowercase"
+                (fun () ->
+                  Jest.Expect.(
+                    expect
+                      (to_edn_string
+                         (of_edn_string
+                            {|#uuid "550E8400-E29B-41D4-A716-446655440000"|}))
+                    |> toEqual
+                         {|#uuid "550e8400-e29b-41d4-a716-446655440000"|}));
+              Jest.test "rejects malformed UUID literals" (fun () ->
+                  let results =
+                    Array.map
+                      (fun source ->
+                        try
+                          ignore (of_edn_string source);
+                          "accepted"
+                        with Parse_error _ -> "rejected")
+                      [|
+                        {|#uuid "not-a-uuid"|};
+                        {|#uuid "550e8400-e29b-41d4-a716-44665544000z"|};
+                        {|#uuid "550e8400-e29b-41d4-a716-4466554400000"|};
+                        {|#uuid [550e8400-e29b-41d4-a716-446655440000]|};
+                      |]
+                  in
+                  Jest.Expect.(
+                    expect results
+                    |> toEqual
+                         [| "rejected"; "rejected"; "rejected"; "rejected" |]));
+              Jest.test "accepts cljs.reader inst date literals" (fun () ->
+                  Jest.Expect.(
+                    expect
+                      (to_edn_string
+                         (of_edn_string {|#inst "2010-11-12T13:14:15.666-05:00"|}))
+                    |> toEqual {|#inst "2010-11-12T13:14:15.666-05:00"|}));
+              Jest.test "rejects malformed inst date literals" (fun () ->
+                  let results =
+                    Array.map
+                      (fun source ->
+                        try
+                          ignore (of_edn_string source);
+                          "accepted"
+                        with Parse_error _ -> "rejected")
+                      [|
+                        {|#inst "2010-13-12T13:14:15.666-05:00"|};
+                        {|#inst "2010-11-32T13:14:15.666-05:00"|};
+                        {|#inst "2010-11-12T25:14:15.666-05:00"|};
+                        {|#inst [2010 11 12]|};
+                      |]
+                  in
+                  Jest.Expect.(
+                    expect results
+                    |> toEqual
+                         [| "rejected"; "rejected"; "rejected"; "rejected" |]));
+              Jest.test "falls back date tag to a generic tagged literal"
+                (fun () ->
+                  Jest.Expect.(
+                    expect (to_edn_string (of_edn_string {|#date "2010-11-12"|}))
+                    |> toEqual {|#date "2010-11-12"|})));
           Jest.test "reads all values" (fun () ->
               Jest.Expect.(
                 expect
@@ -324,6 +383,59 @@ let () =
                     expect results
                     |> toEqual
                          [| "rejected"; "rejected"; "rejected"; "rejected" |])));
+          Jest.describe "remaining cljs.reader compatibility cases" (fun () ->
+              Jest.test "reads the first form and ignores trailing forms"
+                (fun () ->
+                  Jest.Expect.(
+                    expect (to_edn_string (of_edn_string "1 2"))
+                    |> toEqual "1"));
+              Jest.test "reads the first non-comment form with later forms"
+                (fun () ->
+                  Jest.Expect.(
+                    expect (to_edn_string (of_edn_string ";foo\n3\n5"))
+                    |> toEqual "3"));
+              Jest.test "parses ratio literals" (fun () ->
+                  Jest.Expect.(
+                    expect
+                      [|
+                        to_edn_string (of_edn_string "4/2");
+                        to_edn_string (of_edn_string "+4/2");
+                        to_edn_string (of_edn_string "-4/2");
+                      |]
+                    |> toEqual [| "4/2"; "4/2"; "-4/2" |]));
+              Jest.test "parses quote reader macro" (fun () ->
+                  Jest.Expect.(
+                    expect (to_edn_string (of_edn_string "'foo"))
+                    |> toEqual "(quote foo)"));
+              Jest.test "parses deref reader macro" (fun () ->
+                  Jest.Expect.(
+                    expect (to_edn_string (of_edn_string "@foo"))
+                    |> toEqual "(deref foo)"));
+              Jest.test "parses var reader macro" (fun () ->
+                  Jest.Expect.(
+                    expect (to_edn_string (of_edn_string "#'foo"))
+                    |> toEqual "(var foo)"));
+              Jest.test "parses regex literals" (fun () ->
+                  Jest.Expect.(
+                    expect
+                      [|
+                        to_edn_string (of_edn_string {|#"(?i)abc"|});
+                        to_edn_string (of_edn_string {|#"\[\]?(\\\")\\"|});
+                      |]
+                    |> toEqual [| {|#"(?i)abc"|}; {|#"\[\]?(\\\")\\"|} |]));
+              Jest.test "consumes metadata prefix before maps" (fun () ->
+                  Jest.Expect.(
+                    expect (to_edn_string (of_edn_string "^String {:a 1}"))
+                    |> toEqual "{:a 1}"));
+              Jest.test "consumes metadata prefix before quoted forms" (fun () ->
+                  Jest.Expect.(
+                    expect (to_edn_string (of_edn_string "^:foo 'bar"))
+                    |> toEqual "(quote bar)"));
+              Jest.test "parses simple anonymous function reader macro"
+                (fun () ->
+                  Jest.Expect.(
+                    expect (to_edn_string (of_edn_string "#(foo bar baz)"))
+                    |> toEqual "(fn* [] (foo bar baz))")));
           Jest.describe "EDN writing" (fun () ->
               Jest.test "writes atoms" (fun () ->
                   Jest.Expect.(
@@ -393,10 +505,6 @@ let () =
                          (edn_map [ (edn_keyword "ok", edn_bool true) ]))
                     |> toEqual {|{"ok":true}|})));
           Jest.describe "errors" (fun () ->
-              Jest.test "rejects trailing forms" (fun () ->
-                  Jest.Expect.(
-                    expectFn (fun () -> ignore (of_edn_string "1 2")) ()
-                    |> toThrow));
               Jest.test "rejects odd map entry count" (fun () ->
                   Jest.Expect.(
                     expectFn (fun () -> ignore (of_edn_string "{:a 1 :b}")) ()

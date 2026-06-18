@@ -6,6 +6,7 @@ type set = Set_tag
 type vector = Vector_tag
 type list_ = List_tag
 type number = Number_tag
+type regex = Regex_tag
 
 type keyword_value = string
 
@@ -20,6 +21,8 @@ type _ t =
   | Bigint : string -> number t
   | Float : float -> number t
   | Decimal : string -> number t
+  | Ratio : string -> number t
+  | Regex : string -> regex t
   | List : any iarray -> list_ t
   | Vector : any iarray -> vector t
   | Map : (any * any) iarray -> map t
@@ -59,6 +62,8 @@ let int value = Int value
 let bigint value = Bigint value
 let float value = Float value
 let decimal value = Decimal value
+let ratio value = Ratio value
+let regex value = Regex value
 let list values = List (Iarray.of_list values)
 let vector values = Vector (Iarray.of_list values)
 let map entries = Map (Iarray.of_list entries)
@@ -360,6 +365,17 @@ module Parser = struct
   let normalize_numeric_literal value =
     match strip_leading_plus value with "-0" -> "0" | value -> value
 
+  let full_ratio_literal token =
+    let len = String.length token in
+    let start = skip_sign token in
+    match consume_integer_body token start with
+    | Some numerator_end
+      when numerator_end < len && token.[numerator_end] = '/' -> (
+        match consume_integer_body token (numerator_end + 1) with
+        | Some denominator_end -> denominator_end = len
+        | None -> false)
+    | _ -> false
+
   let invalid_based_integer_literal token =
     let len = String.length token in
     let start = skip_sign token in
@@ -397,6 +413,8 @@ module Parser = struct
       if full_float_literal body then
         Some (any (Decimal (normalize_numeric_literal body)))
       else None
+    else if full_ratio_literal token then
+      Some (any (Ratio (normalize_numeric_literal token)))
     else
       (match parse_based_integer token with
       | Some value -> Some (any (Int value))
@@ -445,6 +463,11 @@ module Parser = struct
     | _ when String.length token = 1 -> any (Char (Uchar.of_char token.[0]))
     | _ -> parse_error parser ("invalid character literal: \\" ^ token)
 
+  let reader_macro_list macro value =
+    any
+      (List
+         (Iarray.of_list [ any (Symbol macro); value ]))
+
   let rec read_required parser =
     match read_value parser with
     | Some value -> value
@@ -473,6 +496,16 @@ module Parser = struct
     | Some '#' ->
         ignore (next parser);
         read_dispatch parser
+    | Some '\'' ->
+        ignore (next parser);
+        Some (reader_macro_list "quote" (read_required parser))
+    | Some '@' ->
+        ignore (next parser);
+        Some (reader_macro_list "deref" (read_required parser))
+    | Some '^' ->
+        ignore (next parser);
+        ignore (read_required parser);
+        Some (read_required parser)
     | Some _ -> Some (parse_token parser (read_token parser))
 
   and read_sequence parser closing =
@@ -541,6 +574,142 @@ module Parser = struct
     | "-Inf" -> Some (any (Float Float.neg_infinity))
     | _ -> parse_error parser ("unsupported symbolic value: ##" ^ token)
 
+  and read_regex parser =
+    let buffer = Buffer.create 32 in
+    let rec loop () =
+      match next parser with
+      | '"' -> Some (any (Regex (Buffer.contents buffer)))
+      | '\\' ->
+          Buffer.add_char buffer '\\';
+          Buffer.add_char buffer (next parser);
+          loop ()
+      | ch ->
+          Buffer.add_char buffer ch;
+          loop ()
+    in
+    loop ()
+
+  and string_payload parser tag (Any value) =
+    match value with
+    | String value -> value
+    | _ -> parse_error parser (tag ^ " literal expects a string representation")
+
+  and is_hex_digit = function
+    | '0' .. '9' | 'a' .. 'f' | 'A' .. 'F' -> true
+    | _ -> false
+
+  and read_uuid_tag parser value =
+    let uuid = string_payload parser "UUID" value in
+    let valid =
+      String.length uuid = 36
+      && List.for_all
+           (fun index -> uuid.[index] = '-')
+           [ 8; 13; 18; 23 ]
+      && String.for_all
+           (fun ch -> ch = '-' || is_hex_digit ch)
+           uuid
+    in
+    if valid then any (Tagged ("uuid", any (String (String.lowercase_ascii uuid))))
+    else parse_error parser ("Invalid UUID literal: " ^ uuid)
+
+  and parse_fixed_digits parser source pos count label =
+    let len = String.length source in
+    if pos + count > len then parse_error parser ("Invalid inst " ^ label);
+    let rec loop index value =
+      if index = count then value
+      else
+        match source.[pos + index] with
+        | '0' .. '9' as ch ->
+            loop (index + 1) ((value * 10) + Char.code ch - Char.code '0')
+        | _ -> parse_error parser ("Invalid inst " ^ label)
+    in
+    loop 0 0
+
+  and check_range parser label low high value =
+    if value < low || value > high then
+      parse_error parser (Printf.sprintf "Invalid inst %s" label)
+
+  and validate_inst_literal parser source =
+    let len = String.length source in
+    let pos = ref 0 in
+    let read count label =
+      let value = parse_fixed_digits parser source !pos count label in
+      pos := !pos + count;
+      value
+    in
+    let expect ch label =
+      if !pos >= len || source.[!pos] <> ch then
+        parse_error parser ("Invalid inst " ^ label);
+      incr pos
+    in
+    ignore (read 4 "year");
+    if !pos < len then begin
+      expect '-' "month separator";
+      let month = read 2 "month" in
+      check_range parser "month" 1 12 month;
+      if !pos < len then begin
+        expect '-' "day separator";
+        let day = read 2 "day" in
+        check_range parser "day" 1 31 day;
+        if !pos < len then begin
+          expect 'T' "time separator";
+          let hour = read 2 "hour" in
+          check_range parser "hour" 0 23 hour;
+          expect ':' "minute separator";
+          let minute = read 2 "minute" in
+          check_range parser "minute" 0 59 minute;
+          if !pos < len && source.[!pos] = ':' then (
+            incr pos;
+            let second = read 2 "second" in
+            check_range parser "second" 0 60 second);
+          if !pos < len && source.[!pos] = '.' then (
+            incr pos;
+            let fraction_start = !pos in
+            while !pos < len && is_digit source.[!pos] do
+              incr pos
+            done;
+            if !pos = fraction_start then
+              parse_error parser "Invalid inst fraction");
+          if !pos < len then
+            match source.[!pos] with
+            | 'Z' ->
+                incr pos
+            | '+' | '-' ->
+                incr pos;
+                let offset_hour = read 2 "offset hour" in
+                check_range parser "offset hour" 0 23 offset_hour;
+                expect ':' "offset separator";
+                let offset_minute = read 2 "offset minute" in
+                check_range parser "offset minute" 0 59 offset_minute
+            | _ -> parse_error parser "Invalid inst offset"
+        end
+      end
+    end;
+    if !pos <> len then parse_error parser "Invalid inst literal"
+
+  and read_inst_tag parser value =
+    let instant = string_payload parser "inst" value in
+    validate_inst_literal parser instant;
+    any (Tagged ("inst", any (String instant)))
+
+  and read_tagged_value parser tag value =
+    match tag with
+    | "uuid" -> read_uuid_tag parser value
+    | "inst" -> read_inst_tag parser value
+    | _ -> any (Tagged (tag, value))
+
+  and read_anonymous_function parser =
+    let body = any (List (Iarray.of_list (read_sequence parser ')'))) in
+    Some
+      (any
+         (List
+            (Iarray.of_list
+                 [
+                 any (Symbol "fn*");
+                 any (Vector (Iarray.of_list []));
+                 body;
+               ])))
+
   and read_dispatch parser =
     match peek parser with
     | Some '{' ->
@@ -565,10 +734,19 @@ module Parser = struct
     | Some '#' ->
         ignore (next parser);
         read_symbolic_value parser
+    | Some '"' ->
+        ignore (next parser);
+        read_regex parser
+    | Some '\'' ->
+        ignore (next parser);
+        Some (reader_macro_list "var" (read_required parser))
+    | Some '(' ->
+        ignore (next parser);
+        read_anonymous_function parser
     | Some ch when ('A' <= ch && ch <= 'Z') || ('a' <= ch && ch <= 'z') ->
         let tag = read_token parser in
         let value = read_required parser in
-        Some (any (Tagged (tag, value)))
+        Some (read_tagged_value parser tag value)
     | Some ch ->
         parse_error parser (Printf.sprintf "unsupported dispatch: #%c" ch)
     | None -> parse_error parser "missing dispatch character"
@@ -594,9 +772,7 @@ let of_edn_string source =
       if Parser.is_eof parser then any Nil
       else Parser.parse_error parser "unexpected closing delimiter"
   | Some value ->
-      Parser.skip_ws parser;
-      if Parser.is_eof parser then value
-      else Parser.parse_error parser "expected a single EDN value"
+      value
 
 let escape_string value =
   let buffer = Buffer.create (String.length value + 8) in
@@ -655,6 +831,8 @@ let rec to_edn_string (Any value) =
   | Float value when classify_float value = FP_infinite -> "##-Inf"
   | Float value -> string_of_float value
   | Decimal value -> normalize_number value ^ "M"
+  | Ratio value -> normalize_number value
+  | Regex value -> "#\"" ^ value ^ "\""
   | List values -> "(" ^ join_iarray " " to_edn_string values ^ ")"
   | Vector values -> "[" ^ join_iarray " " to_edn_string values ^ "]"
   | Set values -> "#{" ^ join_iarray " " to_edn_string values ^ "}"
@@ -742,6 +920,8 @@ and to_json (Any value) =
   | Bigint value -> Js.Json.string value
   | Float value -> Js.Json.number value
   | Decimal value -> Js.Json.string value
+  | Ratio value -> Js.Json.string value
+  | Regex value -> Js.Json.string value
   | List values | Vector values -> json_array values
   | Set values -> json_array values
   | Map entries -> json_object entries

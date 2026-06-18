@@ -6,6 +6,7 @@ type set = Set_tag
 type vector = Vector_tag
 type list_ = List_tag
 type number = Number_tag
+type regex = Regex_tag
 
 type keyword_value
 
@@ -20,6 +21,8 @@ type _ t = private
   | Bigint : string -> number t
   | Float : float -> number t
   | Decimal : string -> number t
+  | Ratio : string -> number t
+  | Regex : string -> regex t
   | List : any iarray -> list_ t
   | Vector : any iarray -> vector t
   | Map : (any * any) iarray -> map t
@@ -41,6 +44,8 @@ val int : int64 -> number t
 val bigint : string -> number t
 val float : float -> number t
 val decimal : string -> number t
+val ratio : string -> number t
+val regex : string -> regex t
 val list : any list -> list_ t
 val vector : any list -> vector t
 val map : (any * any) list -> map t
