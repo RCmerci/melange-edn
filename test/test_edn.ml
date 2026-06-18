@@ -17,6 +17,21 @@ let edn_map entries = edn (map entries)
 let edn_set values = edn (set values)
 let edn_tagged tag value = edn (tagged tag value)
 
+let parsed_string source =
+  match of_edn_string source with
+  | Any (String value) -> value
+  | _ -> "not a string"
+
+let parsed_char_code source =
+  match of_edn_string source with
+  | Any (Char value) -> Uchar.to_int value
+  | _ -> -1
+
+let parsed_float source =
+  match of_edn_string source with
+  | Any (Float value) -> value
+  | _ -> 0.0
+
 let () =
   Jest.describe "EDN reader/writer" (fun () ->
       Jest.describe "GADT constructors" (fun () ->
@@ -436,6 +451,243 @@ let () =
                   Jest.Expect.(
                     expect (to_edn_string (of_edn_string "#(foo bar baz)"))
                     |> toEqual "(fn* [] (foo bar baz))")));
+          Jest.describe "upstream no-runtime compatibility cases" (fun () ->
+              Jest.test "parses additional integer literal examples"
+                (fun () ->
+                  Jest.Expect.(
+                    expect
+                      (Array.map
+                         (fun source -> to_edn_string (of_edn_string source))
+                         [|
+                           "0x42e";
+                           "+0x42e";
+                           "-0x42e";
+                           "0777";
+                           "-0777";
+                           "02474";
+                           "-02474";
+                         |])
+                    |> toEqual
+                         [|
+                           "1070"; "1070"; "-1070"; "511"; "-511"; "1340"; "-1340";
+                         |]));
+              Jest.test "parses additional floating literal examples"
+                (fun () ->
+                  Jest.Expect.(
+                    expect
+                      (Array.map parsed_float
+                         [|
+                           "42.23";
+                           "+42.23";
+                           "-42.23";
+                           "42.2e3";
+                           "+42.2e+3";
+                           "-42.2e-3";
+                         |])
+                    |> toEqual
+                         [| 42.23; 42.23; -42.23; 42200.; 42200.; -0.0422 |]));
+              Jest.test "parses additional symbol forms" (fun () ->
+                  let sources =
+                    [|
+                      "*+!-_?";
+                      "abc:def:ghi";
+                      "abc.def/ghi";
+                      "abc/def.ghi";
+                      "abc:def/ghi:jkl.mno";
+                      "foo//";
+                    |]
+                  in
+                  Jest.Expect.(
+                    expect
+                      (Array.map
+                         (fun source -> to_edn_string (of_edn_string source))
+                         sources)
+                    |> toEqual sources));
+              Jest.test "parses slash symbol as a map key" (fun () ->
+                  Jest.Expect.(
+                    expect (to_edn_string (of_edn_string "({/ 0})"))
+                    |> toEqual "({/ 0})"));
+              Jest.test "parses additional keyword forms" (fun () ->
+                  let sources =
+                    [|
+                      ":foo-bar";
+                      ":*+!-_?";
+                      ":abc:def:ghi";
+                      ":abc.def/ghi";
+                      ":abc/def.ghi";
+                      ":abc:def/ghi:jkl.mno";
+                    |]
+                  in
+                  Jest.Expect.(
+                    expect
+                      (Array.map
+                         (fun source -> to_edn_string (of_edn_string source))
+                         sources)
+                    |> toEqual sources));
+              Jest.test "parses additional character literal scalar values"
+                (fun () ->
+                  Jest.Expect.(
+                    expect
+                      (Array.map parsed_char_code
+                         [|
+                           {|\f|};
+                           {|\u0194|};
+                           {|\o0|};
+                           {|\o000|};
+                           {|\o377|};
+                           {|\u0041|};
+                           {|\@|};
+                           {|\ud7ff|};
+                           {|\ue000|};
+                           {|\uffff|};
+                         |])
+                    |> toEqual
+                         [|
+                           102; 404; 0; 0; 255; 65; 64; 55295; 57344; 65535;
+                         |]));
+              Jest.test "rejects surrogate unicode escape values" (fun () ->
+                  let results =
+                    Array.map
+                      (fun source ->
+                        try
+                          ignore (of_edn_string source);
+                          "accepted"
+                        with Parse_error _ -> "rejected")
+                      [| {|\ud800|}; {|"\ud800"|} |]
+                  in
+                  Jest.Expect.(
+                    expect results |> toEqual [| "rejected"; "rejected" |]));
+              Jest.test "parses additional string unicode and octal escapes"
+                (fun () ->
+                  Jest.Expect.(
+                    expect
+                      (Array.map parsed_string
+                         [|
+                           {|"foo\000bar"|};
+                           {|"foo\u0194bar"|};
+                           {|"foo\123bar"|};
+                           {|"0"|};
+                           {|"\340"|};
+                           {|"\377"|};
+                         |])
+                    |> toEqual
+                         [| "foo\000bar"; "fooƔbar"; "fooSbar"; "0"; "à"; "ÿ" |]));
+              Jest.test "parses empty and nested collections" (fun () ->
+                  let sources =
+                    [|
+                      "()";
+                      "(foo (bar) baz)";
+                      "[]";
+                      "[foo [bar] baz]";
+                      "{}";
+                      "{foo {bar baz}}";
+                      "#{}";
+                      "#{foo #{bar} baz}";
+                    |]
+                  in
+                  Jest.Expect.(
+                    expect
+                      (Array.map
+                         (fun source -> to_edn_string (of_edn_string source))
+                         sources)
+                    |> toEqual sources));
+              Jest.test "parses no-space and namespaced tagged literals"
+                (fun () ->
+                  Jest.Expect.(
+                    expect
+                      (Array.map
+                         (fun source -> to_edn_string (of_edn_string source))
+                         [|
+                           {|#inst"2010-11-12T13:14:15.666-05:00"|};
+                           {|#uuid"550e8400-e29b-41d4-a716-446655440000"|};
+                           "#foo bar";
+                           "#foo.bar/baz [1 2]";
+                         |])
+                    |> toEqual
+                         [|
+                           {|#inst "2010-11-12T13:14:15.666-05:00"|};
+                           {|#uuid "550e8400-e29b-41d4-a716-446655440000"|};
+                           "#foo bar";
+                           "#foo.bar/baz [1 2]";
+                         |]));
+              Jest.test "parses unicode strings" (fun () ->
+                  let sources =
+                    [|
+                      {|"اختبار"|};
+                      {|"ทดสอบ"|};
+                      {|"こんにちは"|};
+                      {|"你好"|};
+                      {|"אַ גוט יאָר"|};
+                      {|"cześć"|};
+                      {|"привет"|};
+                    |]
+                  in
+                  Jest.Expect.(
+                    expect
+                      (Array.map
+                         (fun source -> to_edn_string (of_edn_string source))
+                         sources)
+                    |> toEqual sources));
+              Jest.test "parses unicode symbols and keywords" (fun () ->
+                  let sources =
+                    [|
+                      "ทดสอบ";
+                      "こんにちは";
+                      "你好";
+                      "cześć";
+                      "привет";
+                      ":ทดสอบ";
+                      ":こんにちは";
+                      ":你好";
+                      ":cześć";
+                      ":привет";
+                    |]
+                  in
+                  Jest.Expect.(
+                    expect
+                      (Array.map
+                         (fun source -> to_edn_string (of_edn_string source))
+                         sources)
+                    |> toEqual sources));
+              Jest.test "parses compound unicode maps" (fun () ->
+                  Jest.Expect.(
+                    expect (to_edn_string (of_edn_string {|{:привет :ru "你好" :cn}|}))
+                    |> toEqual {|{:привет :ru "你好" :cn}|}));
+              Jest.test "rejects malformed unicode string escapes" (fun () ->
+                  let results =
+                    Array.map
+                      (fun source ->
+                        try
+                          ignore (of_edn_string source);
+                          "accepted"
+                        with Parse_error _ -> "rejected")
+                      [| {|"abc \ua"|}; {|"abc \x0z"|}; {|"abc \u0g00"|} |]
+                  in
+                  Jest.Expect.(
+                    expect results |> toEqual [| "rejected"; "rejected"; "rejected" |]));
+              Jest.test "accepts partial inst literals without normalization"
+                (fun () ->
+                  Jest.Expect.(
+                    expect
+                      (Array.map
+                         (fun source -> to_edn_string (of_edn_string source))
+                         [|
+                           {|#inst "1500"|};
+                           {|#inst "1582-10-04"|};
+                           {|#inst "1582-10-04T23:59:59.999"|};
+                         |])
+                    |> toEqual
+                         [|
+                           {|#inst "1500"|};
+                           {|#inst "1582-10-04"|};
+                           {|#inst "1582-10-04T23:59:59.999"|};
+                         |]));
+              Jest.test "rejects multiple duplicate set values" (fun () ->
+                  Jest.Expect.(
+                    expectFn
+                      (fun () -> ignore (of_edn_string "#{foo foo bar bar}"))
+                      ()
+                    |> toThrow)));
           Jest.describe "EDN writing" (fun () ->
               Jest.test "writes atoms" (fun () ->
                   Jest.Expect.(
