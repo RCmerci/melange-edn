@@ -244,44 +244,57 @@ module Parser = struct
       Some (consume_digits token (pos + 1))
     else None
 
-  let full_integer_literal token =
-    match consume_integer_body token (skip_sign token) with
-    | Some pos -> pos = String.length token
-    | None -> false
+  type decimal_number_kind =
+    | Decimal_integer
+    | Decimal_float
+    | Decimal_ratio
+    | Decimal_not_number
 
-  let full_float_literal token =
+  let classify_decimal_number token =
     let len = String.length token in
     match consume_integer_body token (skip_sign token) with
-    | None -> false
+    | None -> Decimal_not_number
     | Some integer_end -> (
-        match
-          if integer_end < len && token.[integer_end] = '.' then
-            let fraction_start = integer_end + 1 in
-            let after_digits = consume_digits token fraction_start in
-            if after_digits = fraction_start then None else Some after_digits
-          else Some integer_end
-        with
-        | None -> false
-        | Some pos -> (
-            match
-              if pos < len && (token.[pos] = 'e' || token.[pos] = 'E') then
-                let exponent_start =
-                  if
-                    pos + 1 < len
-                    && (token.[pos + 1] = '+' || token.[pos + 1] = '-')
-                  then pos + 2
-                  else pos + 1
-                in
-                let exponent_end = consume_digits token exponent_start in
-                if exponent_end = exponent_start then None
-                else Some exponent_end
-              else Some pos
-            with
-            | None -> false
-            | Some pos -> pos = len))
+        let consume_exponent pos =
+          if pos < len && (token.[pos] = 'e' || token.[pos] = 'E') then
+            let exponent_start =
+              if
+                pos + 1 < len
+                && (token.[pos + 1] = '+' || token.[pos + 1] = '-')
+              then pos + 2
+              else pos + 1
+            in
+            let exponent_end = consume_digits token exponent_start in
+            if exponent_end = exponent_start then None else Some exponent_end
+          else Some pos
+        in
+        if integer_end = len then Decimal_integer
+        else
+          match token.[integer_end] with
+          | '/' -> (
+              match consume_integer_body token (integer_end + 1) with
+              | Some denominator_end when denominator_end = len -> Decimal_ratio
+              | _ -> Decimal_not_number)
+          | '.' -> (
+              let fraction_start = integer_end + 1 in
+              let fraction_end = consume_digits token fraction_start in
+              if fraction_end = fraction_start then Decimal_not_number
+              else
+                match consume_exponent fraction_end with
+                | Some float_end when float_end = len -> Decimal_float
+                | _ -> Decimal_not_number)
+          | 'e' | 'E' -> (
+              match consume_exponent integer_end with
+              | Some float_end when float_end = len -> Decimal_float
+              | _ -> Decimal_not_number)
+          | _ -> Decimal_not_number)
 
-  let has_float_marker token =
-    String.exists (function '.' | 'e' | 'E' -> true | _ -> false) token
+  let string_for_all_from token start predicate =
+    let len = String.length token in
+    let rec loop pos =
+      pos = len || (predicate token.[pos] && loop (pos + 1))
+    in
+    loop start
 
   let digit_value = function
     | '0' .. '9' as ch -> Some (Char.code ch - Char.code '0')
@@ -350,8 +363,7 @@ module Parser = struct
           | _ -> None)
       | None ->
           if sign_start + 1 < len && token.[sign_start] = '0'
-             && String.for_all is_octal_digit
-                  (String.sub token sign_start (len - sign_start))
+             && string_for_all_from token sign_start is_octal_digit
           then
             Option.map apply_sign
               (parse_unsigned_based_integer 8 token sign_start)
@@ -365,25 +377,12 @@ module Parser = struct
   let normalize_numeric_literal value =
     match strip_leading_plus value with "-0" -> "0" | value -> value
 
-  let full_ratio_literal token =
-    let len = String.length token in
-    let start = skip_sign token in
-    match consume_integer_body token start with
-    | Some numerator_end
-      when numerator_end < len && token.[numerator_end] = '/' -> (
-        match consume_integer_body token (numerator_end + 1) with
-        | Some denominator_end -> denominator_end = len
-        | None -> false)
-    | _ -> false
-
   let invalid_based_integer_literal token =
     let len = String.length token in
     let start = skip_sign token in
     if start >= len || not (is_digit token.[start]) then false
     else if start + 1 < len && token.[start] = '0' && is_digit token.[start + 1]
-            && not
-                 (String.for_all is_octal_digit
-                    (String.sub token start (len - start)))
+            && not (string_for_all_from token start is_octal_digit)
     then true
     else if start + 1 < len && token.[start] = '0'
             && (token.[start + 1] = 'x' || token.[start + 1] = 'X')
@@ -402,28 +401,31 @@ module Parser = struct
     let len = String.length token in
     if len > 1 && token.[len - 1] = 'N' then
       let body = String.sub token 0 (len - 1) in
+      let decimal_kind = classify_decimal_number body in
       (match parse_based_integer body with
       | Some value -> Some (any (Bigint (Int64.to_string value)))
       | None ->
-          if full_integer_literal body then
+          if decimal_kind = Decimal_integer then
             Some (any (Bigint (normalize_numeric_literal body)))
           else None)
     else if len > 1 && token.[len - 1] = 'M' then
       let body = String.sub token 0 (len - 1) in
-      if full_float_literal body then
-        Some (any (Decimal (normalize_numeric_literal body)))
-      else None
-    else if full_ratio_literal token then
-      Some (any (Ratio (normalize_numeric_literal token)))
+      (match classify_decimal_number body with
+      | Decimal_integer | Decimal_float ->
+          Some (any (Decimal (normalize_numeric_literal body)))
+      | Decimal_ratio | Decimal_not_number -> None)
     else
-      (match parse_based_integer token with
-      | Some value -> Some (any (Int value))
-      | None ->
-          if has_float_marker token && full_float_literal token then
-            Some (any (Float (float_of_string token)))
-          else if full_integer_literal token then
-            Some (any (Int (Int64.of_string token)))
-          else None)
+      let decimal_kind = classify_decimal_number token in
+      if decimal_kind = Decimal_ratio then
+        Some (any (Ratio (normalize_numeric_literal token)))
+      else
+        (match parse_based_integer token with
+        | Some value -> Some (any (Int value))
+        | None -> (
+            match decimal_kind with
+            | Decimal_float -> Some (any (Float (float_of_string token)))
+            | Decimal_integer -> Some (any (Int (Int64.of_string token)))
+            | Decimal_ratio | Decimal_not_number -> None))
 
   let parse_token parser token =
     match token with
@@ -528,16 +530,19 @@ module Parser = struct
 
   and read_map_with_key_transform parser transform_key =
     let values = read_sequence parser '}' in
-    let rec pairs keys acc = function
+    let seen = Hashtbl.create (List.length values / 2) in
+    let rec pairs acc = function
       | [] -> any (Map (Iarray.of_list (List.rev acc)))
       | [ _ ] -> parse_error parser "map requires an even number of forms"
       | key :: value :: rest ->
           let key = transform_key key in
-          if List.exists (fun existing -> existing = key) keys then
+          if Hashtbl.mem seen key then
             parse_error parser "Map literal contains duplicate key"
-          else pairs (key :: keys) ((key, value) :: acc) rest
+          else (
+            Hashtbl.add seen key ();
+            pairs ((key, value) :: acc) rest)
     in
-    pairs [] [] values
+    pairs [] values
 
   and read_map parser = read_map_with_key_transform parser (fun key -> key)
 
@@ -715,14 +720,17 @@ module Parser = struct
     | Some '{' ->
         ignore (next parser);
         let values = read_sequence parser '}' in
-        let rec ensure_unique seen = function
+        let seen = Hashtbl.create (List.length values) in
+        let rec ensure_unique = function
           | [] -> ()
           | value :: rest ->
-              if List.exists (fun existing -> existing = value) seen then
+              if Hashtbl.mem seen value then
                 parse_error parser "Set literal contains duplicate key"
-              else ensure_unique (value :: seen) rest
+              else (
+                Hashtbl.add seen value ();
+                ensure_unique rest)
         in
-        ensure_unique [] values;
+        ensure_unique values;
         Some (any (Set (Iarray.of_list values)))
     | Some '_' ->
         ignore (next parser);
@@ -806,45 +814,74 @@ let string_of_char_literal uchar =
     | exception Invalid_argument _ ->
         Printf.sprintf "\\u%04X" (Uchar.to_int uchar)
 
-let join_iarray separator render values =
-  let buffer = Buffer.create 32 in
+let normalize_number value =
+  if value = "-0" || value = "+0" then "0" else Parser.strip_leading_plus value
+
+let rec write_edn buffer (Any value) =
+  match value with
+  | Nil -> Buffer.add_string buffer "nil"
+  | Bool true -> Buffer.add_string buffer "true"
+  | Bool false -> Buffer.add_string buffer "false"
+  | String value ->
+      Buffer.add_char buffer '"';
+      Buffer.add_string buffer (escape_string value);
+      Buffer.add_char buffer '"'
+  | Char value -> Buffer.add_string buffer (string_of_char_literal value)
+  | Symbol value -> Buffer.add_string buffer value
+  | Keyword value ->
+      Buffer.add_char buffer ':';
+      Buffer.add_string buffer (keyword_to_string value)
+  | Int value -> Buffer.add_string buffer (Int64.to_string value)
+  | Bigint value ->
+      Buffer.add_string buffer (normalize_number value);
+      Buffer.add_char buffer 'N'
+  | Float value when classify_float value = FP_nan ->
+      Buffer.add_string buffer "##NaN"
+  | Float value when classify_float value = FP_infinite && value > 0. ->
+      Buffer.add_string buffer "##Inf"
+  | Float value when classify_float value = FP_infinite ->
+      Buffer.add_string buffer "##-Inf"
+  | Float value -> Buffer.add_string buffer (string_of_float value)
+  | Decimal value ->
+      Buffer.add_string buffer (normalize_number value);
+      Buffer.add_char buffer 'M'
+  | Ratio value -> Buffer.add_string buffer (normalize_number value)
+  | Regex value ->
+      Buffer.add_string buffer "#\"";
+      Buffer.add_string buffer value;
+      Buffer.add_char buffer '"'
+  | List values -> write_delimited buffer "(" ")" values
+  | Vector values -> write_delimited buffer "[" "]" values
+  | Set values -> write_delimited buffer "#{" "}" values
+  | Map entries ->
+      Buffer.add_char buffer '{';
+      Iarray.iteri
+        (fun index (key, value) ->
+          if index > 0 then Buffer.add_char buffer ' ';
+          write_edn buffer key;
+          Buffer.add_char buffer ' ';
+          write_edn buffer value)
+        entries;
+      Buffer.add_char buffer '}'
+  | Tagged (tag, value) ->
+      Buffer.add_char buffer '#';
+      Buffer.add_string buffer tag;
+      Buffer.add_char buffer ' ';
+      write_edn buffer value
+
+and write_delimited buffer opening closing values =
+  Buffer.add_string buffer opening;
   Iarray.iteri
     (fun index value ->
-      if index > 0 then Buffer.add_string buffer separator;
-      Buffer.add_string buffer (render value))
+      if index > 0 then Buffer.add_char buffer ' ';
+      write_edn buffer value)
     values;
+  Buffer.add_string buffer closing
+
+let to_edn_string value =
+  let buffer = Buffer.create 64 in
+  write_edn buffer value;
   Buffer.contents buffer
-
-let rec to_edn_string (Any value) =
-  match value with
-  | Nil -> "nil"
-  | Bool true -> "true"
-  | Bool false -> "false"
-  | String value -> "\"" ^ escape_string value ^ "\""
-  | Char value -> string_of_char_literal value
-  | Symbol value -> value
-  | Keyword value -> ":" ^ keyword_to_string value
-  | Int value -> Int64.to_string value
-  | Bigint value -> normalize_number value ^ "N"
-  | Float value when classify_float value = FP_nan -> "##NaN"
-  | Float value when classify_float value = FP_infinite && value > 0. -> "##Inf"
-  | Float value when classify_float value = FP_infinite -> "##-Inf"
-  | Float value -> string_of_float value
-  | Decimal value -> normalize_number value ^ "M"
-  | Ratio value -> normalize_number value
-  | Regex value -> "#\"" ^ value ^ "\""
-  | List values -> "(" ^ join_iarray " " to_edn_string values ^ ")"
-  | Vector values -> "[" ^ join_iarray " " to_edn_string values ^ "]"
-  | Set values -> "#{" ^ join_iarray " " to_edn_string values ^ "}"
-  | Map entries ->
-      let render_entry (key, value) =
-        to_edn_string key ^ " " ^ to_edn_string value
-      in
-      "{" ^ join_iarray " " render_entry entries ^ "}"
-  | Tagged (tag, value) -> "#" ^ tag ^ " " ^ to_edn_string value
-
-and normalize_number value =
-  if value = "-0" || value = "+0" then "0" else Parser.strip_leading_plus value
 
 let min_safe_json_integer = -9007199254740991.
 let max_safe_json_integer = 9007199254740991.
@@ -874,14 +911,16 @@ let rec of_json json =
   | JSONString value -> any (String value)
   | JSONNumber value -> edn_number_of_json_number value
   | JSONArray values ->
-      any (Vector (Iarray.of_list (List.map of_json (Array.to_list values))))
+      any
+        (Vector
+           (Iarray.init (Array.length values) (fun index -> of_json values.(index))))
   | JSONObject entries ->
+      let entries = Js.Dict.entries entries in
       any
         (Map
-           (Iarray.of_list
-              (List.map
-                 (fun (key, value) -> (any (String key), of_json value))
-                 (Array.to_list (Js.Dict.entries entries)))))
+           (Iarray.init (Array.length entries) (fun index ->
+                let key, value = entries.(index) in
+                (any (String key), of_json value))))
 
 let of_json_string source = Js.Json.parseExn source |> of_json
 
@@ -894,11 +933,10 @@ let json_key_of_value (Any value) =
       invalid_arg
         "EDN map contains a key that cannot be encoded as a JSON object name"
 
-let iarray_to_list render values =
-  Iarray.fold_right (fun value acc -> render value :: acc) values []
-
 let rec json_array values =
-  Js.Json.array (Array.of_list (iarray_to_list to_json values))
+  Js.Json.array
+    (Array.init (Iarray.length values) (fun index ->
+         to_json (Iarray.get values index)))
 
 and json_object entries =
   let json = Js.Dict.empty () in

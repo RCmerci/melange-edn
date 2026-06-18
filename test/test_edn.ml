@@ -32,6 +32,33 @@ let parsed_float source =
   | Any (Float value) -> value
   | _ -> 0.0
 
+let indexed_entries count render =
+  List.init count render
+
+let large_edn_map_source count =
+  let entries =
+    indexed_entries count (fun index ->
+        ":k" ^ string_of_int index ^ " " ^ string_of_int index)
+  in
+  "{" ^ String.concat " " entries ^ "}"
+
+let large_edn_set_source count =
+  let values =
+    indexed_entries count (fun index -> ":v" ^ string_of_int index)
+  in
+  "#{" ^ String.concat " " values ^ "}"
+
+let large_json_array_source count =
+  let values = indexed_entries count string_of_int in
+  "[" ^ String.concat "," values ^ "]"
+
+let large_json_object_source count =
+  let entries =
+    indexed_entries count (fun index ->
+        "\"k" ^ string_of_int index ^ "\":" ^ string_of_int index)
+  in
+  "{" ^ String.concat "," entries ^ "}"
+
 let () =
   Jest.describe "EDN reader/writer" (fun () ->
       Jest.describe "GADT constructors" (fun () ->
@@ -688,6 +715,47 @@ let () =
                       (fun () -> ignore (of_edn_string "#{foo foo bar bar}"))
                       ()
                     |> toThrow)));
+          Jest.describe "performance-sensitive behavior guards" (fun () ->
+              Jest.test "preserves ordering for larger parsed maps and sets"
+                (fun () ->
+                  let map_source = large_edn_map_source 256 in
+                  let set_source = large_edn_set_source 256 in
+                  Jest.Expect.(
+                    expect
+                      [|
+                        to_edn_string (of_edn_string map_source);
+                        to_edn_string (of_edn_string set_source);
+                      |]
+                    |> toEqual [| map_source; set_source |]));
+              Jest.test "rejects duplicate keys and values near the end of larger literals"
+                (fun () ->
+                  let duplicate_map =
+                    let entries =
+                      indexed_entries 256 (fun index ->
+                          ":k" ^ string_of_int index ^ " " ^ string_of_int index)
+                    in
+                    "{"
+                    ^ String.concat " " (entries @ [ ":k128 :duplicate" ])
+                    ^ "}"
+                  in
+                  let duplicate_set =
+                    let values =
+                      indexed_entries 256 (fun index ->
+                          ":v" ^ string_of_int index)
+                    in
+                    "#{" ^ String.concat " " (values @ [ ":v128" ]) ^ "}"
+                  in
+                  let results =
+                    Array.map
+                      (fun source ->
+                        try
+                          ignore (of_edn_string source);
+                          "accepted"
+                        with Parse_error _ -> "rejected")
+                      [| duplicate_map; duplicate_set |]
+                  in
+                  Jest.Expect.(
+                    expect results |> toEqual [| "rejected"; "rejected" |]));
           Jest.describe "EDN writing" (fun () ->
               Jest.test "writes atoms" (fun () ->
                   Jest.Expect.(
@@ -726,6 +794,15 @@ let () =
                             ]))
                     |> toEqual
                          {|{:a 1 "b" [true nil] :s #{x y} :tag #my/app {:ok true}}|})));
+              Jest.test "writes larger maps without changing entry order" (fun () ->
+                  let entries =
+                    indexed_entries 256 (fun index ->
+                        ( edn_keyword ("k" ^ string_of_int index),
+                          edn_int (Int64.of_int index) ))
+                  in
+                  Jest.Expect.(
+                    expect (to_edn_string (edn_map entries))
+                    |> toEqual (large_edn_map_source 256))));
           Jest.describe "JSON conversion" (fun () ->
               let edn =
                 edn_map
@@ -755,7 +832,17 @@ let () =
                     expect
                       (to_json_string
                          (edn_map [ (edn_keyword "ok", edn_bool true) ]))
-                    |> toEqual {|{"ok":true}|})));
+                    |> toEqual {|{"ok":true}|}));
+              Jest.test "round trips larger JSON arrays and objects" (fun () ->
+                  let array_source = large_json_array_source 256 in
+                  let object_source = large_json_object_source 256 in
+                  Jest.Expect.(
+                    expect
+                      [|
+                        to_json_string (of_json_string array_source);
+                        to_json_string (of_json_string object_source);
+                      |]
+                    |> toEqual [| array_source; object_source |])));
           Jest.describe "errors" (fun () ->
               Jest.test "rejects odd map entry count" (fun () ->
                   Jest.Expect.(
