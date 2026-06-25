@@ -21,7 +21,7 @@
  (bug_reports "https://github.com/RCmerci/melange-edn/issues")
  (depends
   (ocaml  (>= 5.2))
-  melange
-  js_of_ocaml
-  yojson
-  (alcotest :with-test)))
+  (melange (>= 5.0.0-52))
+  (js_of_ocaml (>= 5.7.0))
+  (yojson (>= 3.0.0))
+  (alcotest (and :with-test (>= 1.5.0)))))
