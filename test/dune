@@ -1,8 +1,24 @@
+(test
+ (name test_core)
+ (modules test_core)
+ (libraries alcotest melange-edn melange-edn.yojson))
+
+(test
+ (name test_json)
+ (modules test_json)
+ (libraries melange-edn melange-edn.yojson))
+
+(executable
+ (name test_jsoo)
+ (modules test_jsoo)
+ (modes js)
+ (libraries js_of_ocaml melange-edn melange-edn.jsoo))
+
 (melange.emit
  (target melange_edn_melange)
- (modules test_edn test_melange)
+ (modules test_melange)
  (module_systems commonjs)
- (libraries melange_edn melange.js melange-jest.jest))
+ (libraries melange-edn melange-edn.melange))
 
 (rule
  (alias runtest)
@@ -10,13 +26,9 @@
   (= %{profile} dev))
  (deps
   (alias melange)
-  melange_edn_melange/test/test_edn.js
+  test_jsoo.bc.js
   melange_edn_melange/test/test_melange.js)
  (action
-  (chdir
-   %{workspace_root}
-   (run
-    npx
-    jest
-    --testMatch
-    **/_build/default/test/melange_edn_melange/test/*.js))))
+  (progn
+   (run node test_jsoo.bc.js)
+   (run node melange_edn_melange/test/test_melange.js))))

@@ -7,7 +7,6 @@ type vector = Vector_tag
 type list_ = List_tag
 type number = Number_tag
 type regex = Regex_tag
-
 type keyword_value = string
 
 type _ t =
@@ -23,10 +22,10 @@ type _ t =
   | Decimal : string -> number t
   | Ratio : string -> number t
   | Regex : string -> regex t
-  | List : any iarray -> list_ t
-  | Vector : any iarray -> vector t
-  | Map : (any * any) iarray -> map t
-  | Set : any iarray -> set t
+  | List : any array -> list_ t
+  | Vector : any array -> vector t
+  | Map : (any * any) array -> map t
+  | Set : any array -> set t
   | Tagged : string * any -> (string * any) t
 
 and any = Any : _ t -> any
@@ -39,16 +38,16 @@ let invalid_keyword_name value =
   || value = "/"
   || String.starts_with ~prefix:"/" value
 
-let invalid_symbol_name value =
-  String.length value > 0 && value.[0] = ':'
-
+let invalid_symbol_name value = String.length value > 0 && value.[0] = ':'
 let any value = Any value
 let nil = Nil
 let bool value = Bool value
 let string value = String value
 let char value = Char value
+
 let symbol value =
-  if invalid_symbol_name value then raise (Parse_error ("invalid symbol: " ^ value));
+  if invalid_symbol_name value then
+    raise (Parse_error ("invalid symbol: " ^ value));
   Symbol value
 
 let keyword value =
@@ -57,17 +56,16 @@ let keyword value =
   Keyword value
 
 let keyword_to_string value = value
-
 let int value = Int value
 let bigint value = Bigint value
 let float value = Float value
 let decimal value = Decimal value
 let ratio value = Ratio value
 let regex value = Regex value
-let list values = List (Iarray.of_list values)
-let vector values = Vector (Iarray.of_list values)
-let map entries = Map (Iarray.of_list entries)
-let set values = Set (Iarray.of_list values)
+let list values = List (Array.of_list values)
+let vector values = Vector (Array.of_list values)
+let map entries = Map (Array.of_list entries)
+let set values = Set (Array.of_list values)
 let tagged tag value = Tagged (tag, value)
 
 module Parser = struct
@@ -259,8 +257,7 @@ module Parser = struct
           if pos < len && (token.[pos] = 'e' || token.[pos] = 'E') then
             let exponent_start =
               if
-                pos + 1 < len
-                && (token.[pos + 1] = '+' || token.[pos + 1] = '-')
+                pos + 1 < len && (token.[pos + 1] = '+' || token.[pos + 1] = '-')
               then pos + 2
               else pos + 1
             in
@@ -291,9 +288,7 @@ module Parser = struct
 
   let string_for_all_from token start predicate =
     let len = String.length token in
-    let rec loop pos =
-      pos = len || (predicate token.[pos] && loop (pos + 1))
-    in
+    let rec loop pos = pos = len || (predicate token.[pos] && loop (pos + 1)) in
     loop start
 
   let digit_value = function
@@ -308,13 +303,39 @@ module Parser = struct
     let len = String.length token in
     if start >= len then None
     else
+      let int64_base = Int64.of_int base in
       let rec loop pos acc =
         if pos = len then Some acc
         else
           match digit_value token.[pos] with
           | Some digit when digit < base ->
-              loop (pos + 1)
-                Int64.(add (mul acc (of_int base)) (of_int digit))
+              let int64_digit = Int64.of_int digit in
+              let max_before_digit =
+                Int64.div (Int64.sub Int64.max_int int64_digit) int64_base
+              in
+              if Int64.compare acc max_before_digit > 0 then None
+              else
+                loop (pos + 1)
+                  Int64.(add (mul acc int64_base) int64_digit)
+          | _ -> None
+      in
+      loop start 0L
+
+  let parse_negative_based_integer base token start =
+    let len = String.length token in
+    if start >= len then None
+    else
+      let int64_base = Int64.of_int base in
+      let rec loop pos acc =
+        if pos = len then Some acc
+        else
+          match digit_value token.[pos] with
+          | Some digit when digit < base ->
+              let next =
+                Int64.(sub (mul acc int64_base) (of_int digit))
+              in
+              if Int64.compare next acc > 0 then None
+              else loop (pos + 1) next
           | _ -> None
       in
       loop start 0L
@@ -336,37 +357,38 @@ module Parser = struct
     let len = String.length token in
     let rec loop pos =
       if pos >= len then None
-      else
-        match token.[pos] with
-        | 'r' | 'R' -> Some pos
-        | _ -> loop (pos + 1)
+      else match token.[pos] with 'r' | 'R' -> Some pos | _ -> loop (pos + 1)
     in
     loop start
 
   let parse_based_integer token =
     let len = String.length token in
     let sign_start = skip_sign token in
-    let sign = if sign_start = 1 && token.[0] = '-' then -1L else 1L in
-    let apply_sign value = Int64.mul sign value in
-    if sign_start + 2 < len && token.[sign_start] = '0'
-       && (token.[sign_start + 1] = 'x' || token.[sign_start + 1] = 'X')
+    let parse_integer base start =
+      if sign_start = 1 && token.[0] = '-' then
+        parse_negative_based_integer base token start
+      else parse_unsigned_based_integer base token start
+    in
+    if
+      sign_start + 2 < len
+      && token.[sign_start] = '0'
+      && (token.[sign_start + 1] = 'x' || token.[sign_start + 1] = 'X')
     then
-      Option.map apply_sign
-        (parse_unsigned_based_integer 16 token (sign_start + 2))
+      parse_integer 16 (sign_start + 2)
     else
       match find_radix_marker token sign_start with
       | Some marker_pos -> (
           match parse_decimal_base token sign_start marker_pos with
           | Some base when base >= 2 && base <= 36 ->
-              Option.map apply_sign
-                (parse_unsigned_based_integer base token (marker_pos + 1))
+              parse_integer base (marker_pos + 1)
           | _ -> None)
       | None ->
-          if sign_start + 1 < len && token.[sign_start] = '0'
-             && string_for_all_from token sign_start is_octal_digit
+          if
+            sign_start + 1 < len
+            && token.[sign_start] = '0'
+            && string_for_all_from token sign_start is_octal_digit
           then
-            Option.map apply_sign
-              (parse_unsigned_based_integer 8 token sign_start)
+            parse_integer 8 sign_start
           else None
 
   let strip_leading_plus value =
@@ -381,12 +403,22 @@ module Parser = struct
     let len = String.length token in
     let start = skip_sign token in
     if start >= len || not (is_digit token.[start]) then false
-    else if start + 1 < len && token.[start] = '0' && is_digit token.[start + 1]
-            && not (string_for_all_from token start is_octal_digit)
+    else if
+      start + 1 < len
+      && token.[start] = '0'
+      && is_digit token.[start + 1]
+      && not (string_for_all_from token start is_octal_digit)
     then true
-    else if start + 1 < len && token.[start] = '0'
-            && (token.[start + 1] = 'x' || token.[start + 1] = 'X')
-    then Option.is_none (parse_unsigned_based_integer 16 token (start + 2))
+    else if
+      start + 1 < len
+      && token.[start] = '0'
+      && (token.[start + 1] = 'x' || token.[start + 1] = 'X')
+    then Option.is_none (parse_based_integer token)
+    else if
+      start + 1 < len
+      && token.[start] = '0'
+      && string_for_all_from token start is_octal_digit
+    then Option.is_none (parse_based_integer token)
     else
       match find_radix_marker token start with
       | None -> false
@@ -402,30 +434,30 @@ module Parser = struct
     if len > 1 && token.[len - 1] = 'N' then
       let body = String.sub token 0 (len - 1) in
       let decimal_kind = classify_decimal_number body in
-      (match parse_based_integer body with
+      match parse_based_integer body with
       | Some value -> Some (any (Bigint (Int64.to_string value)))
       | None ->
           if decimal_kind = Decimal_integer then
             Some (any (Bigint (normalize_numeric_literal body)))
-          else None)
+          else None
     else if len > 1 && token.[len - 1] = 'M' then
       let body = String.sub token 0 (len - 1) in
-      (match classify_decimal_number body with
+      match classify_decimal_number body with
       | Decimal_integer | Decimal_float ->
           Some (any (Decimal (normalize_numeric_literal body)))
-      | Decimal_ratio | Decimal_not_number -> None)
+      | Decimal_ratio | Decimal_not_number -> None
     else
       let decimal_kind = classify_decimal_number token in
       if decimal_kind = Decimal_ratio then
         Some (any (Ratio (normalize_numeric_literal token)))
       else
-        (match parse_based_integer token with
+        match parse_based_integer token with
         | Some value -> Some (any (Int value))
         | None -> (
             match decimal_kind with
             | Decimal_float -> Some (any (Float (float_of_string token)))
             | Decimal_integer -> Some (any (Int (Int64.of_string token)))
-            | Decimal_ratio | Decimal_not_number -> None))
+            | Decimal_ratio | Decimal_not_number -> None)
 
   let parse_token parser token =
     match token with
@@ -435,6 +467,7 @@ module Parser = struct
     | "false" -> any (Bool false)
     | _ -> (
         match parse_number token with
+        | exception Failure _ -> parse_error parser ("Invalid number: " ^ token)
         | Some value -> value
         | None when String.length token > 0 && token.[0] = ':' ->
             let value = String.sub token 1 (String.length token - 1) in
@@ -466,9 +499,7 @@ module Parser = struct
     | _ -> parse_error parser ("invalid character literal: \\" ^ token)
 
   let reader_macro_list macro value =
-    any
-      (List
-         (Iarray.of_list [ any (Symbol macro); value ]))
+    any (List (Array.of_list [ any (Symbol macro); value ]))
 
   let rec read_required parser =
     match read_value parser with
@@ -488,10 +519,10 @@ module Parser = struct
         Some (read_char parser)
     | Some '(' ->
         ignore (next parser);
-        Some (any (List (Iarray.of_list (read_sequence parser ')'))))
+        Some (any (List (Array.of_list (read_sequence parser ')'))))
     | Some '[' ->
         ignore (next parser);
-        Some (any (Vector (Iarray.of_list (read_sequence parser ']'))))
+        Some (any (Vector (Array.of_list (read_sequence parser ']'))))
     | Some '{' ->
         ignore (next parser);
         Some (read_map parser)
@@ -532,7 +563,7 @@ module Parser = struct
     let values = read_sequence parser '}' in
     let seen = Hashtbl.create (List.length values / 2) in
     let rec pairs acc = function
-      | [] -> any (Map (Iarray.of_list (List.rev acc)))
+      | [] -> any (Map (Array.of_list (List.rev acc)))
       | [ _ ] -> parse_error parser "map requires an even number of forms"
       | key :: value :: rest ->
           let key = transform_key key in
@@ -607,14 +638,11 @@ module Parser = struct
     let uuid = string_payload parser "UUID" value in
     let valid =
       String.length uuid = 36
-      && List.for_all
-           (fun index -> uuid.[index] = '-')
-           [ 8; 13; 18; 23 ]
-      && String.for_all
-           (fun ch -> ch = '-' || is_hex_digit ch)
-           uuid
+      && List.for_all (fun index -> uuid.[index] = '-') [ 8; 13; 18; 23 ]
+      && String.for_all (fun ch -> ch = '-' || is_hex_digit ch) uuid
     in
-    if valid then any (Tagged ("uuid", any (String (String.lowercase_ascii uuid))))
+    if valid then
+      any (Tagged ("uuid", any (String (String.lowercase_ascii uuid))))
     else parse_error parser ("Invalid UUID literal: " ^ uuid)
 
   and parse_fixed_digits parser source pos count label =
@@ -677,8 +705,7 @@ module Parser = struct
               parse_error parser "Invalid inst fraction");
           if !pos < len then
             match source.[!pos] with
-            | 'Z' ->
-                incr pos
+            | 'Z' -> incr pos
             | '+' | '-' ->
                 incr pos;
                 let offset_hour = read 2 "offset hour" in
@@ -704,16 +731,12 @@ module Parser = struct
     | _ -> any (Tagged (tag, value))
 
   and read_anonymous_function parser =
-    let body = any (List (Iarray.of_list (read_sequence parser ')'))) in
+    let body = any (List (Array.of_list (read_sequence parser ')'))) in
     Some
       (any
          (List
-            (Iarray.of_list
-                 [
-                 any (Symbol "fn*");
-                 any (Vector (Iarray.of_list []));
-                 body;
-               ])))
+            (Array.of_list
+               [ any (Symbol "fn*"); any (Vector (Array.of_list [])); body ])))
 
   and read_dispatch parser =
     match peek parser with
@@ -731,7 +754,7 @@ module Parser = struct
                 ensure_unique rest)
         in
         ensure_unique values;
-        Some (any (Set (Iarray.of_list values)))
+        Some (any (Set (Array.of_list values)))
     | Some '_' ->
         ignore (next parser);
         ignore (read_required parser);
@@ -779,8 +802,7 @@ let of_edn_string source =
       Parser.skip_ws parser;
       if Parser.is_eof parser then any Nil
       else Parser.parse_error parser "unexpected closing delimiter"
-  | Some value ->
-      value
+  | Some value -> value
 
 let escape_string value =
   let buffer = Buffer.create (String.length value + 8) in
@@ -855,7 +877,7 @@ let rec write_edn buffer (Any value) =
   | Set values -> write_delimited buffer "#{" "}" values
   | Map entries ->
       Buffer.add_char buffer '{';
-      Iarray.iteri
+      Array.iteri
         (fun index (key, value) ->
           if index > 0 then Buffer.add_char buffer ' ';
           write_edn buffer key;
@@ -871,7 +893,7 @@ let rec write_edn buffer (Any value) =
 
 and write_delimited buffer opening closing values =
   Buffer.add_string buffer opening;
-  Iarray.iteri
+  Array.iteri
     (fun index value ->
       if index > 0 then Buffer.add_char buffer ' ';
       write_edn buffer value)
@@ -882,93 +904,3 @@ let to_edn_string value =
   let buffer = Buffer.create 64 in
   write_edn buffer value;
   Buffer.contents buffer
-
-let min_safe_json_integer = -9007199254740991.
-let max_safe_json_integer = 9007199254740991.
-
-let is_safe_json_integer value =
-  value >= min_safe_json_integer
-  && value <= max_safe_json_integer
-  && value = floor value
-
-let int64_is_safe_json_integer value =
-  value >= Int64.of_float min_safe_json_integer
-  && value <= Int64.of_float max_safe_json_integer
-
-let edn_number_of_json_number value =
-  if is_safe_json_integer value then any (Int (Int64.of_float value))
-  else any (Float value)
-
-let json_number_of_int64 value =
-  if int64_is_safe_json_integer value then Js.Json.number (Int64.to_float value)
-  else Js.Json.string (Int64.to_string value)
-
-let rec of_json json =
-  match Js.Json.classify json with
-  | JSONNull -> any Nil
-  | JSONFalse -> any (Bool false)
-  | JSONTrue -> any (Bool true)
-  | JSONString value -> any (String value)
-  | JSONNumber value -> edn_number_of_json_number value
-  | JSONArray values ->
-      any
-        (Vector
-           (Iarray.init (Array.length values) (fun index -> of_json values.(index))))
-  | JSONObject entries ->
-      let entries = Js.Dict.entries entries in
-      any
-        (Map
-           (Iarray.init (Array.length entries) (fun index ->
-                let key, value = entries.(index) in
-                (any (String key), of_json value))))
-
-let of_json_string source = Js.Json.parseExn source |> of_json
-
-let json_key_of_value (Any value) =
-  match value with
-  | String value -> value
-  | Keyword value -> keyword_to_string value
-  | Symbol value -> value
-  | _ ->
-      invalid_arg
-        "EDN map contains a key that cannot be encoded as a JSON object name"
-
-let rec json_array values =
-  Js.Json.array
-    (Array.init (Iarray.length values) (fun index ->
-         to_json (Iarray.get values index)))
-
-and json_object entries =
-  let json = Js.Dict.empty () in
-  Iarray.iter
-    (fun (key, value) ->
-      Js.Dict.set json (json_key_of_value key) (to_json value))
-    entries;
-  Js.Json.object_ json
-
-and to_json (Any value) =
-  match value with
-  | Nil -> Js.Json.null
-  | Bool value -> Js.Json.boolean value
-  | String value -> Js.Json.string value
-  | Char value -> Js.Json.string (string_of_char_literal value)
-  | Symbol value -> Js.Json.string value
-  | Keyword value -> Js.Json.string (":" ^ keyword_to_string value)
-  | Int value -> json_number_of_int64 value
-  | Bigint value -> Js.Json.string value
-  | Float value -> Js.Json.number value
-  | Decimal value -> Js.Json.string value
-  | Ratio value -> Js.Json.string value
-  | Regex value -> Js.Json.string value
-  | List values | Vector values -> json_array values
-  | Set values -> json_array values
-  | Map entries -> json_object entries
-  | Tagged (tag, value) ->
-      json_object
-        (Iarray.of_list
-           [
-             (any (String "tag"), any (String tag));
-             (any (String "value"), value);
-           ])
-
-let to_json_string value = Js.Json.stringify (to_json value)

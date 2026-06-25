@@ -1,26 +1,22 @@
-open Melange_edn
+module Edn = Melange_edn
+module Bridge = Melange_edn_melange
+
+let assert_equal label expected actual =
+  if not (String.equal expected actual) then
+    failwith
+      (Printf.sprintf "%s: expected %S, got %S" label expected actual)
 
 let () =
-  Jest.describe "Melange smoke" (fun () ->
-      Jest.test "writes EDN" (fun () ->
-          let edn =
-            of_edn_string {|{:name "Ada" :tags ["ocaml" nil] :ok true}|}
-          in
-          Jest.Expect.(
-            expect (to_edn_string edn)
-            |> toEqual {|{:name "Ada" :tags ["ocaml" nil] :ok true}|}));
-      Jest.test "reads JSON strings" (fun () ->
-          Jest.Expect.(
-            expect
-              (to_edn_string
-                 (of_json_string
-                    {|{"name":"Ada","age":37,"admin":false,"tags":["ocaml",null]}|}))
-            |> toEqual
-                 {|{"name" "Ada" "age" 37 "admin" false "tags" ["ocaml" nil]}|}));
-      Jest.test "writes JSON strings" (fun () ->
-          let edn =
-            of_edn_string {|{:name "Ada" :tags ["ocaml" nil] :ok true}|}
-          in
-          Jest.Expect.(
-            expect (to_json_string edn)
-            |> toEqual {|{"name":"Ada","tags":["ocaml",null],"ok":true}|})))
+  assert_equal "Melange bridge reads Js.Json.t"
+    {|{"name" "Ada" "tags" ["ocaml" nil]}|}
+    (Edn.to_edn_string
+       (Bridge.of_json
+          (Js.Json.parseExn {|{"name":"Ada","tags":["ocaml",null]}|})));
+  assert_equal "Melange bridge writes Js.Json.t"
+    {|{"name":"Ada","tags":["ocaml",null]}|}
+    (Js.Json.stringify
+       (Bridge.to_json
+          (Bridge.of_json_string {|{"name":"Ada","tags":["ocaml",null]}|})));
+  assert_equal "Melange bridge keeps JSON string helpers"
+    {|{"ok":true}|}
+    (Bridge.to_json_string (Bridge.of_json_string {|{"ok":true}|}))

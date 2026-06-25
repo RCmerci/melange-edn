@@ -7,7 +7,6 @@ type vector = Vector_tag
 type list_ = List_tag
 type number = Number_tag
 type regex = Regex_tag
-
 type keyword_value
 
 type _ t = private
@@ -23,10 +22,10 @@ type _ t = private
   | Decimal : string -> number t
   | Ratio : string -> number t
   | Regex : string -> regex t
-  | List : any iarray -> list_ t
-  | Vector : any iarray -> vector t
-  | Map : (any * any) iarray -> map t
-  | Set : any iarray -> set t
+  | List : any array -> list_ t
+  | Vector : any array -> vector t
+  | Map : (any * any) array -> map t
+  | Set : any array -> set t
   | Tagged : string * any -> (string * any) t
 
 and any = Any : _ t -> any
@@ -51,13 +50,7 @@ val vector : any list -> vector t
 val map : (any * any) list -> map t
 val set : any list -> set t
 val tagged : string -> any -> (string * any) t
-
 val keyword_to_string : keyword_value -> string
-
 val of_edn_string : string -> any
 val of_edn_string_all : string -> any list
 val to_edn_string : any -> string
-val of_json : Js.Json.t -> any
-val of_json_string : string -> any
-val to_json : any -> Js.Json.t
-val to_json_string : any -> string
