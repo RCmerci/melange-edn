@@ -23,5 +23,5 @@
   (ocaml  (>= 5.2))
   (melange (>= 5.0.0-52))
   (js_of_ocaml (>= 5.7.0))
-  (yojson (>= 3.0.0))
+  (yojson (and (>= 2.2.2) (< 3.0.0)))
   (alcotest (and :with-test (>= 1.5.0)))))
