@@ -24,9 +24,6 @@ let rec of_json = function
   | `Intlit value -> Edn.any (Edn.bigint value)
   | `Float value -> edn_number_of_json_number value
   | `List values -> Edn.any (Edn.vector (List.map of_json values))
-  | `Tuple values -> Edn.any (Edn.vector (List.map of_json values))
-  | `Variant (tag, None) -> Edn.any (Edn.tagged tag (Edn.any Edn.nil))
-  | `Variant (tag, Some value) -> Edn.any (Edn.tagged tag (of_json value))
   | `Assoc entries ->
       Edn.any
         (Edn.map
