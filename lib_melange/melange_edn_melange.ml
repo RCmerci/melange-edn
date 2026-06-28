@@ -1,3 +1,5 @@
+include Melange_edn
+
 module Edn = Melange_edn
 
 let min_safe_json_integer = -9007199254740991.
@@ -15,6 +17,13 @@ let int64_is_safe_json_integer value =
 let edn_number_of_json_number value =
   if is_safe_json_integer value then Edn.any (Edn.int (Int64.of_float value))
   else Edn.any (Edn.float value)
+
+let json_string_of_non_finite_float value =
+  match classify_float value with
+  | FP_nan -> Some "NaN"
+  | FP_infinite when value > 0. -> Some "Infinity"
+  | FP_infinite -> Some "-Infinity"
+  | FP_normal | FP_subnormal | FP_zero -> None
 
 let rec of_json json =
   match Js.Json.classify json with
@@ -75,7 +84,10 @@ and to_json (Edn.Any value) =
   | Edn.Keyword value -> Js.Json.string (":" ^ Edn.keyword_to_string value)
   | Edn.Int value -> json_number_of_int64 value
   | Edn.Bigint value -> Js.Json.string value
-  | Edn.Float value -> Js.Json.number value
+  | Edn.Float value -> (
+      match json_string_of_non_finite_float value with
+      | Some value -> Js.Json.string value
+      | None -> Js.Json.number value)
   | Edn.Decimal value -> Js.Json.string value
   | Edn.Ratio value -> Js.Json.string value
   | Edn.Regex value -> Js.Json.string value

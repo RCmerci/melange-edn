@@ -1,34 +1,55 @@
+(library
+ (name test_support)
+ (modules test_support)
+ (modes :standard melange))
+
+(test
+ (name test_core_package)
+ (package melange-edn-core)
+ (modules test_core_package)
+ (libraries melange-edn-core test_support))
+
 (test
  (name test_core)
+ (package melange-edn-native)
  (modules test_core)
- (libraries alcotest melange-edn melange-edn.yojson))
+ (libraries alcotest melange-edn-native))
 
 (test
  (name test_json)
+ (package melange-edn-native)
  (modules test_json)
- (libraries melange-edn melange-edn.yojson))
+ (libraries melange-edn-native test_support))
 
 (executable
  (name test_jsoo)
  (modules test_jsoo)
  (modes js)
- (libraries js_of_ocaml melange-edn melange-edn.jsoo))
+ (libraries js_of_ocaml melange-edn-jsoo test_support))
 
 (melange.emit
  (target melange_edn_melange)
+ (package melange-edn-melange)
  (modules test_melange)
  (module_systems commonjs)
- (libraries melange-edn melange-edn.melange))
+ (libraries melange-edn-melange test_support))
 
 (rule
  (alias runtest)
+ (package melange-edn-jsoo)
+ (enabled_if
+  (= %{profile} dev))
+ (deps test_jsoo.bc.js)
+ (action
+  (run node test_jsoo.bc.js)))
+
+(rule
+ (alias runtest)
+ (package melange-edn-melange)
  (enabled_if
   (= %{profile} dev))
  (deps
   (alias melange)
-  test_jsoo.bc.js
   melange_edn_melange/test/test_melange.js)
  (action
-  (progn
-   (run node test_jsoo.bc.js)
-   (run node melange_edn_melange/test/test_melange.js))))
+  (run node melange_edn_melange/test/test_melange.js)))

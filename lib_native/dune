@@ -1,0 +1,5 @@
+(library
+ (name melange_edn_native)
+ (public_name melange-edn-native)
+ (modules melange_edn_native)
+ (libraries melange-edn-core yojson))

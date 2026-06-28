@@ -1,3 +1,5 @@
+module Melange_edn = Melange_edn_native
+
 module Assert = struct
   let string = Alcotest.(check string) "string"
   let strings = Alcotest.(check (array string)) "string array"
@@ -21,9 +23,6 @@ module Assert = struct
           (Printf.sprintf "expected Parse_error, got %s" (Printexc.to_string exn))
     | _ -> Alcotest.fail "expected function to raise Parse_error"
 end
-
-let of_json_string = Melange_edn_yojson.of_json_string
-let to_json_string = Melange_edn_yojson.to_json_string
 
 open Melange_edn
 
@@ -741,9 +740,9 @@ let edn_parsing_json_conversion_tests =
         Assert.strings
           [| "9007199254740993N"; "123456789012345678901234567890N" |]
           [|
-            to_edn_string (Melange_edn_yojson.of_json (`Intlit "9007199254740993"));
+            to_edn_string (Melange_edn.of_json (`Intlit "9007199254740993"));
             to_edn_string
-              (Melange_edn_yojson.of_json
+              (Melange_edn.of_json
                  (`Intlit "123456789012345678901234567890"));
           |]);
   ]

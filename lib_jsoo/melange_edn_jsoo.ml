@@ -1,4 +1,7 @@
 open Js_of_ocaml
+
+include Melange_edn
+
 module Edn = Melange_edn
 
 type json = Js.Unsafe.any
@@ -49,6 +52,13 @@ let int64_is_safe_json_integer value =
 let edn_number_of_json_number value =
   if is_safe_json_integer value then Edn.any (Edn.int (Int64.of_float value))
   else Edn.any (Edn.float value)
+
+let json_string_of_non_finite_float value =
+  match classify_float value with
+  | FP_nan -> Some "NaN"
+  | FP_infinite when value > 0. -> Some "Infinity"
+  | FP_infinite -> Some "-Infinity"
+  | FP_normal | FP_subnormal | FP_zero -> None
 
 let js_type value = Js.to_string (Js.typeof (Js.Unsafe.coerce value))
 
@@ -120,7 +130,7 @@ and json_object entries =
 and to_json (Edn.Any value) =
   match value with
   | Edn.Nil -> Js.Unsafe.inject Js.null
-  | Edn.Bool value -> Js.Unsafe.inject value
+  | Edn.Bool value -> Js.Unsafe.inject (Js.bool value)
   | Edn.String value -> Js.Unsafe.inject (Js.string value)
   | Edn.Char value ->
       Js.Unsafe.inject
@@ -130,7 +140,10 @@ and to_json (Edn.Any value) =
       Js.Unsafe.inject (Js.string (":" ^ Edn.keyword_to_string value))
   | Edn.Int value -> json_number_of_int64 value
   | Edn.Bigint value -> Js.Unsafe.inject (Js.string value)
-  | Edn.Float value -> Js.Unsafe.inject value
+  | Edn.Float value -> (
+      match json_string_of_non_finite_float value with
+      | Some value -> Js.Unsafe.inject (Js.string value)
+      | None -> Js.Unsafe.inject value)
   | Edn.Decimal value -> Js.Unsafe.inject (Js.string value)
   | Edn.Ratio value -> Js.Unsafe.inject (Js.string value)
   | Edn.Regex value -> Js.Unsafe.inject (Js.string value)

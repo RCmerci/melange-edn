@@ -1,4 +1,5 @@
 (library
  (name melange_edn_jsoo)
- (public_name melange-edn.jsoo)
- (libraries js_of_ocaml melange-edn))
+ (public_name melange-edn-jsoo)
+ (modules melange_edn_jsoo)
+ (libraries melange-edn-core js_of_ocaml))

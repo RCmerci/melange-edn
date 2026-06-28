@@ -1,5 +1,6 @@
 (library
  (name melange_edn_melange)
- (public_name melange-edn.melange)
+ (public_name melange-edn-melange)
+ (modules melange_edn_melange)
  (modes melange)
- (libraries melange-edn melange.js))
+ (libraries melange-edn-core melange.js))

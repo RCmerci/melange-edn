@@ -1,4 +1,0 @@
-(library
- (name melange_edn_yojson)
- (public_name melange-edn.yojson)
- (libraries melange-edn yojson))

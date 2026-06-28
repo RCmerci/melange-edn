@@ -1,22 +1,42 @@
-module Edn = Melange_edn
-module Bridge = Melange_edn_melange
-
-let assert_equal label expected actual =
-  if not (String.equal expected actual) then
-    failwith
-      (Printf.sprintf "%s: expected %S, got %S" label expected actual)
+module Edn = Melange_edn_melange
 
 let () =
-  assert_equal "Melange bridge reads Js.Json.t"
-    {|{"name" "Ada" "tags" ["ocaml" nil]}|}
+  let json_bridge_value =
+    Edn.of_edn_string Test_support.edn_json_bridge_source
+  in
+  let json_mixed_roundtrip_value =
+    Edn.of_edn_string Test_support.edn_mixed_roundtrip_source
+  in
+  let from_edn = Edn.of_edn_string Test_support.edn_tags_source in
+  Test_support.assert_string "Melange bridge writes EDN values"
+    Test_support.edn_tags_source
+    (Edn.to_edn_string from_edn);
+  Test_support.assert_string "Melange bridge reads Js.Json.t"
+    Test_support.edn_tags_from_json
     (Edn.to_edn_string
-       (Bridge.of_json
-          (Js.Json.parseExn {|{"name":"Ada","tags":["ocaml",null]}|})));
-  assert_equal "Melange bridge writes Js.Json.t"
-    {|{"name":"Ada","tags":["ocaml",null]}|}
+       (Edn.of_json (Js.Json.parseExn Test_support.json_tags_source)));
+  Test_support.assert_string "Melange bridge writes Js.Json.t"
+    Test_support.json_tags_source
     (Js.Json.stringify
-       (Bridge.to_json
-          (Bridge.of_json_string {|{"name":"Ada","tags":["ocaml",null]}|})));
-  assert_equal "Melange bridge keeps JSON string helpers"
-    {|{"ok":true}|}
-    (Bridge.to_json_string (Bridge.of_json_string {|{"ok":true}|}))
+       (Edn.to_json (Edn.of_json_string Test_support.json_tags_source)));
+  Test_support.assert_string "Melange bridge keeps JSON string helpers"
+    Test_support.json_ok_source
+    (Edn.to_json_string (Edn.of_json_string Test_support.json_ok_source));
+  Test_support.assert_string
+    "Melange of_json_string reads mixed JSON values consistently"
+    Test_support.edn_mixed_from_json
+    (Edn.to_edn_string (Edn.of_json_string Test_support.json_mixed_source));
+  Test_support.assert_string "Melange of_json reads mixed JSON values consistently"
+    Test_support.edn_mixed_from_json
+    (Edn.to_edn_string
+       (Edn.of_json (Js.Json.parseExn Test_support.json_mixed_source)));
+  Test_support.assert_string "Melange to_json_string writes EDN values consistently"
+    Test_support.json_edn_values_source
+    (Edn.to_json_string json_bridge_value);
+  Test_support.assert_string "Melange to_json writes EDN values consistently"
+    Test_support.json_edn_values_source
+    (Js.Json.stringify (Edn.to_json json_bridge_value));
+  Test_support.assert_string
+    "Melange to_json_string writes mixed JSON values consistently"
+    Test_support.json_mixed_roundtrip
+    (Edn.to_json_string json_mixed_roundtrip_value)
