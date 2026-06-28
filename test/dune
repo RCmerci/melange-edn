@@ -21,11 +21,23 @@
  (modules test_json)
  (libraries melange-edn-native test_support))
 
+(test
+ (name test_signature_native)
+ (package melange-edn-native)
+ (modules test_signature_native)
+ (libraries melange-edn-core melange-edn-native test_support))
+
 (executable
  (name test_jsoo)
  (modules test_jsoo)
  (modes js)
  (libraries js_of_ocaml melange-edn-jsoo test_support))
+
+(executable
+ (name test_signature_jsoo)
+ (modules test_signature_jsoo)
+ (modes js)
+ (libraries melange-edn-core melange-edn-jsoo test_support))
 
 (melange.emit
  (target melange_edn_melange)
@@ -34,14 +46,23 @@
  (module_systems commonjs)
  (libraries melange-edn-melange test_support))
 
+(melange.emit
+ (target melange_edn_signature)
+ (package melange-edn-melange)
+ (modules test_signature_melange)
+ (module_systems commonjs)
+ (libraries melange-edn-melange test_support))
+
 (rule
  (alias runtest)
  (package melange-edn-jsoo)
  (enabled_if
   (= %{profile} dev))
- (deps test_jsoo.bc.js)
+ (deps test_jsoo.bc.js test_signature_jsoo.bc.js)
  (action
-  (run node test_jsoo.bc.js)))
+  (progn
+   (run node test_jsoo.bc.js)
+   (run node test_signature_jsoo.bc.js))))
 
 (rule
  (alias runtest)
@@ -50,6 +71,9 @@
   (= %{profile} dev))
  (deps
   (alias melange)
-  melange_edn_melange/test/test_melange.js)
+  melange_edn_melange/test/test_melange.js
+  melange_edn_signature/test/test_signature_melange.js)
  (action
-  (run node melange_edn_melange/test/test_melange.js)))
+  (progn
+   (run node melange_edn_melange/test/test_melange.js)
+   (run node melange_edn_signature/test/test_signature_melange.js))))

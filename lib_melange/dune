@@ -7,4 +7,5 @@
  (public_name melange-edn-melange)
  (modules melange_edn melange_edn_melange)
  (modes melange)
+ (wrapped false)
  (libraries melange.js))
