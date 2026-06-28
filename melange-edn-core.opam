@@ -12,7 +12,6 @@ bug-reports: "https://github.com/RCmerci/melange-edn/issues"
 depends: [
   "dune" {>= "3.16"}
   "ocaml" {>= "5.2"}
-  "melange" {>= "5.0.0-52"}
   "alcotest" {with-test & >= "1.5.0"}
   "odoc" {with-doc}
 ]

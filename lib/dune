@@ -1,5 +1,4 @@
 (library
  (name melange_edn)
  (public_name melange-edn-core)
- (modules melange_edn)
- (modes :standard melange))
+ (modules melange_edn))

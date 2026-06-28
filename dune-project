@@ -21,7 +21,6 @@
  (bug_reports "https://github.com/RCmerci/melange-edn/issues")
  (depends
   (ocaml  (>= 5.2))
-  (melange (>= 5.0.0-52))
   (alcotest (and :with-test (>= 1.5.0)))))
 
 (package
